@@ -248,6 +248,22 @@ CREATE TABLE IF NOT EXISTS render_seg_artifacts (
 	PRIMARY KEY (run_id, seg_id, stage)
 );
 CREATE INDEX IF NOT EXISTS idx_render_seg_project ON render_seg_artifacts(project_id, seg_id);
+
+CREATE TABLE IF NOT EXISTS wizard_sessions (
+	id              TEXT PRIMARY KEY,
+	current_step    INTEGER NOT NULL,
+	status          TEXT NOT NULL,
+	topic           TEXT NOT NULL DEFAULT '',
+	category        TEXT NOT NULL DEFAULT '',
+	project_id      TEXT NOT NULL DEFAULT '',
+	state_json      TEXT NOT NULL DEFAULT '{}',
+	cost_micros     INTEGER NOT NULL DEFAULT 0,
+	failed_step     INTEGER NOT NULL DEFAULT 0,
+	error           TEXT NOT NULL DEFAULT '',
+	hook_confirm_ms INTEGER NOT NULL DEFAULT 0,
+	created_at      INTEGER NOT NULL,
+	updated_at      INTEGER NOT NULL
+);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.

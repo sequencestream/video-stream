@@ -33,6 +33,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/visual"
 	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/webui"
+	"github.com/sequencestream/video-stream/internal/wizard"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -164,6 +165,12 @@ func run() error {
 
 	visualEngine := visual.New(visual.Options{Store: taskStore, Reporter: reporter, Logger: logger})
 	hybridEngine := hybrid.New(hybrid.Options{Store: taskStore, Reporter: reporter, Logger: logger})
+	wizardEngine := wizard.New(wizard.Options{
+		Store: taskStore, Projects: taskStore,
+		Radar: radarEngine, Ideation: ideationEngine, Script: scriptEngine,
+		Hybrid: hybridEngine, Compliance: complianceEngine, Render: renderEngine,
+		Recompile: recompiler, Reporter: reporter,
+	})
 
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
@@ -201,6 +208,7 @@ func run() error {
 		Visual:       visualEngine,
 		Hybrid:       hybridEngine,
 		Render:       renderEngine,
+		Wizard:       wizardEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,

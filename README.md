@@ -175,6 +175,10 @@ mux 之后注入 `content_attribute` / `service_provider_code` / `content_id` �
 
 见 [`doc/arch/label.md`](doc/arch/label.md)。
 
+## 7 步端到端向导
+
+WebUI `/wizard/1`–`/wizard/7` 经 `internal/wizard` 编排贯通 radar → ideation → script → hybrid → render → label。操作说明见 [`doc/wizard-guide.md`](doc/wizard-guide.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -304,6 +308,9 @@ vs credential status                           # 每个 provider 的密钥来自
 | GET | `/v1/hybrid/plans/{project_id}` | 读取已存的混合画面计划 |
 | POST | `/v1/render/run` | 启动/续跑渲染管线 |
 | GET | `/v1/render/runs/{id}` | 渲染 run 状态与 seg 产物追溯 |
+| POST | `/v1/wizard/sessions` | 创建向导会话（步骤 1） |
+| GET | `/v1/wizard/sessions/{id}` | 查询会话与任务状态 |
+| POST | `/v1/wizard/sessions/{id}/advance` | 完成当前步并前进 / 续跑 |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -365,6 +372,7 @@ internal/hybrid       混合画面路线（AI / stock / Ken Burns / motion graph
 internal/render       FFmpeg 渲染管线（720p/1080p 共享 context）
 internal/label        mux 后合规标识注入与读回校验（不可关闭）
 internal/youtube      YouTube 上传适配（synthetic 恒 true）
+internal/wizard       7 步端到端向导编排
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler
