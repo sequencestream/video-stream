@@ -1,6 +1,6 @@
 # video-stream
 
-本地优先的 AI 视频生产流水线。当前仓库处于**工程骨架**阶段：架构、进程边界、任务队列、配置与可观测性已经落地，具体的视频生产能力由后续意图填充。
+本地优先的 AI 视频生产流水线。当前仓库处于**工程骨架 + 核心数据模型**阶段：架构、进程边界、任务队列、配置、可观测性，以及描述视频本身的那套数据结构已经落地，具体的视频生产能力由后续意图填充。
 
 ## 架构
 
@@ -22,6 +22,23 @@
 - **Python sidecar**隔离 Python 生态。MVP 阶段它**只有契约、没有实现**——三类能力端点一律返回 `501` 加结构化原因，绝不返回伪造数据。
 - 两者通过 loopback HTTP 通信，Go 侧唯一出口是 `internal/sidecar`。
 - **密钥用户自持**：仓库不托管任何凭据，密钥只存在于用户自己的系统钥匙串或加密文件里，配置文件中没有存放密钥的字段。见 [`doc/arch/credentials.md`](doc/arch/credentials.md)。
+- **核心数据模型**：`internal/model` 定义 seg 图与词级时间戳三层。其中 `duration_budget` 是浮动区间而非定值——增量重编译只有在这个前提下才成立。见 [`doc/arch/data-model.md`](doc/arch/data-model.md)。
+
+## 核心数据模型
+
+```
+Project ──┬─ Seg[]      seg 图：说什么、允许多长、依赖谁、产物能否复用（depends_on 构成 DAG）
+          └─ Timeline   Event → Utterance → Token 三层词级时间戳，由 TTS 对齐产出
+```
+
+`duration_budget_ms` 是 `[min, max]` 闭区间，**定值会被拒绝**。原因是渲染缓存的命中条件为
+「`render_cache_key` 相同 **且** 缓存产物的实际时长落在预算区间内」；预算若是定值，第二个
+条件就要求 TTS 每次合成到毫秒一致，于是改一个字就得全片重渲染。区间半宽被限制在 ±2%~±8%：
+上限是音质红线，下限是增量重编译的存活条件。
+
+`content_hash` 标识「说了什么」，`render_cache_key` 标识「产物能否复用」，两者都带版本前缀、
+逐字段长度前缀编码，且**都不覆盖 `duration_budget`**。完整字段语义、每个字段在 MVP 阶段
+是否有消费者、hash 的稳定性保证，见 [`doc/arch/data-model.md`](doc/arch/data-model.md)。
 
 ## 快速开始
 
@@ -180,7 +197,8 @@ internal/redact      日志与回执的两层脱敏
 internal/provider    模型供应商调用，密钥用时才取
 internal/logging     结构化日志
 internal/telemetry   埋点上报接口
-internal/store       SQLite 任务持久化
+internal/model       核心数据模型：seg 图、词级时间戳、派生 hash、schema 迁移
+internal/store       SQLite 持久化：任务与视频工程
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler
 internal/sidecar     sidecar 契约与客户端
@@ -197,3 +215,5 @@ webui/               Next.js 7 步向导空壳（源码）
 云端多租户、用户体系与计费、Kubernetes 部署，以及任何真实的 ASR / 剪映草稿 / 浏览器自动化 / 渲染逻辑。
 
 密钥方面明确不做：云端密钥托管、团队共享凭据、MVP 阶段的浏览器 cookie 抓取。
+
+数据模型方面明确不做：编辑标签求值（`filler` / `silence` 在纯 TTS 通路下无输入可处理）、可视化时间轴编辑器、`/v1/projects` HTTP 入口、数据库 DDL 迁移框架。理由见 [`doc/arch/data-model.md`](doc/arch/data-model.md) 的「明确不做」。

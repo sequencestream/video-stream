@@ -26,9 +26,36 @@ CREATE TABLE IF NOT EXISTS tasks (
 	updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
+
+CREATE TABLE IF NOT EXISTS projects (
+	id             TEXT PRIMARY KEY,
+	title          TEXT NOT NULL DEFAULT '',
+	schema_version INTEGER NOT NULL,
+	document       TEXT NOT NULL,
+	created_at     INTEGER NOT NULL,
+	updated_at     INTEGER NOT NULL
+);
+
+-- segs is a projection of projects.document, rebuilt on every save. It exists
+-- so that "which segs share this render cache key" is an index lookup instead
+-- of a scan over every stored document; nothing in it is authoritative, which
+-- is why adding a model field needs no DDL change here.
+CREATE TABLE IF NOT EXISTS segs (
+	project_id       TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	seg_id           TEXT NOT NULL,
+	ordinal          INTEGER NOT NULL,
+	content_hash     TEXT NOT NULL,
+	render_cache_key TEXT NOT NULL,
+	duration_min_ms  INTEGER NOT NULL,
+	duration_max_ms  INTEGER NOT NULL,
+	protected        INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (project_id, seg_id)
+);
+CREATE INDEX IF NOT EXISTS idx_segs_render_cache_key ON segs(render_cache_key);
+CREATE INDEX IF NOT EXISTS idx_segs_content_hash ON segs(content_hash);
 `
 
-// SQLiteStore is the SQLite-backed TaskStore.
+// SQLiteStore is the SQLite-backed TaskStore and ProjectStore.
 type SQLiteStore struct {
 	db *sql.DB
 }
