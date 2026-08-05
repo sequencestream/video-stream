@@ -1,0 +1,13 @@
+.git/
+.github/
+bin/
+data/
+output/
+doc/
+webui/
+sidecar/
+*.md
+config.yaml
+config.local.yaml
+.env
+.env.local

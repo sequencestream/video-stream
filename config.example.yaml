@@ -1,0 +1,45 @@
+# video-stream configuration.
+#
+# Copy to config.yaml and adjust. Every field can also be set through a VS_-
+# prefixed environment variable, which takes precedence over this file.
+#
+# API keys are deliberately absent: a provider names the environment variable
+# holding its key via api_key_env, and the key is only ever read from the
+# environment. That keeps credentials out of the repository.
+
+server:
+  addr: ":8080" # VS_SERVER_ADDR
+
+sidecar:
+  base_url: "http://127.0.0.1:8090" # VS_SIDECAR_BASE_URL
+  timeout: 5s # VS_SIDECAR_TIMEOUT
+
+storage:
+  data_dir: "./data" # VS_DATA_DIR — holds video-stream.db
+  output_dir: "./output" # VS_OUTPUT_DIR — holds rendered artifacts
+
+budget:
+  max_cost_per_video_usd: 2.0 # VS_MAX_COST_PER_VIDEO_USD
+  daily_cap_usd: 20.0 # VS_DAILY_CAP_USD
+
+logging:
+  level: "info" # VS_LOG_LEVEL — debug | info | warn | error
+  format: "json" # VS_LOG_FORMAT — json | text
+
+telemetry:
+  enabled: false # VS_TELEMETRY_ENABLED
+  endpoint: "" # VS_TELEMETRY_ENDPOINT — reserved for a remote sink
+
+queue:
+  workers: 2 # VS_QUEUE_WORKERS
+  buffer: 64 # VS_QUEUE_BUFFER
+
+providers:
+  - name: "openai"
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o-mini"
+    api_key_env: "OPENAI_API_KEY"
+  - name: "anthropic"
+    base_url: "https://api.anthropic.com"
+    model: "claude-sonnet-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"
