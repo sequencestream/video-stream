@@ -157,6 +157,18 @@ curl -s -X POST localhost:8080/v1/hybrid/plan \
 
 路线判据与素材策略见 [`doc/arch/hybrid.md`](doc/arch/hybrid.md)。
 
+## 渲染管线（720p / 1080p）
+
+`internal/render` 以 FFmpeg stage 化直出 MP4；720p 预览与 1080p 出片共享 prompt/seed/ref，高清阶段无 LLM。BGM 卡点仅定稿后可跑。
+
+```bash
+curl -s -X POST localhost:8080/v1/render/run \
+  -H 'Content-Type: application/json' \
+  -d '{"project":{...},"resolution":"720p"}'
+```
+
+见 [`doc/arch/render.md`](doc/arch/render.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -238,7 +250,7 @@ make webui   # http://localhost:3000
 
 ```
 vs create [-type echo] [-title T] [-message M] [-wait]   提交任务
-vs render <project> [-resolution 1080p]                  提交渲染任务（当前为占位，必然失败）
+vs render <project> [-resolution 720p|1080p]              提交渲染任务
 vs status <task-id>                                      查询任务
 vs credential set|status|rm <provider>                   管理供应商 API key
 vs version                                               版本号
@@ -284,6 +296,8 @@ vs credential status                           # 每个 provider 的密钥来自
 | POST | `/v1/visual/packs/{id}/apply` | 应用到工程（含整段重跑提示） |
 | POST | `/v1/hybrid/plan` | 混合画面路线规划并持久化 |
 | GET | `/v1/hybrid/plans/{project_id}` | 读取已存的混合画面计划 |
+| POST | `/v1/render/run` | 启动/续跑渲染管线 |
+| GET | `/v1/render/runs/{id}` | 渲染 run 状态与 seg 产物追溯 |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -308,7 +322,7 @@ sidecar（默认 `:8090`）：
 | --- | --- |
 | `echo` | 已实现。回显 payload，用于验证 CLI → 队列 → 存储链路 |
 | `chat` | 已实现。用 [`vogo/aimodel`](https://github.com/vogo/aimodel) 调用配置好的 provider，需要先 `vs credential set` |
-| `render` | 占位。直接失败并说明原因，不伪造成功 |
+| `render` | 已实现。按 project id 跑 staged FFmpeg 管线（720p 预览 / 1080p 出片） |
 | `transcribe` | 转发到 sidecar；sidecar 当前返回 501，该错误会原样上浮 |
 
 ## 开发
@@ -342,6 +356,7 @@ internal/scriptagents 多 Agent 脚本打磨闭环
 internal/compliance   inauthentic 三道闸（渲染前必经）
 internal/visual       L2 视觉样式包与身份栈
 internal/hybrid       混合画面路线（AI / stock / Ken Burns / motion graphics）
+internal/render       FFmpeg 渲染管线（720p/1080p 共享 context）
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler

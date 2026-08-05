@@ -11,6 +11,7 @@ import (
 
 	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
+	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 )
@@ -27,13 +28,15 @@ const (
 type Deps struct {
 	Sidecar   *sidecar.Client
 	Providers *provider.Registry
+	Projects  store.ProjectStore
+	Render    *render.Engine
 }
 
 // Register wires every handler into the registry.
 func Register(r *queue.Registry, deps Deps) {
 	r.Register(TypeEcho, Echo)
 	r.Register(TypeChat, Chat(deps.Providers))
-	r.Register(TypeRender, Render)
+	r.Register(TypeRender, RenderHandler(deps.Render, deps.Projects))
 	r.Register(TypeTranscribe, Transcribe(deps.Sidecar))
 }
 
@@ -94,12 +97,6 @@ func Chat(providers *provider.Registry) queue.Handler {
 			"total_tokens":      completion.TotalTokens,
 		}, nil
 	}
-}
-
-// Render is a placeholder for the render pipeline. It fails rather than
-// pretending to have produced a video.
-func Render(context.Context, store.Task) (map[string]any, error) {
-	return nil, errors.New("render pipeline is not implemented yet; this scaffold only reserves the task type")
 }
 
 // Transcribe forwards to the sidecar. In the MVP the sidecar answers 501, which

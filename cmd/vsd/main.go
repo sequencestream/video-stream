@@ -31,6 +31,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/tasks"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 	"github.com/sequencestream/video-stream/internal/visual"
+	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/webui"
 )
 
@@ -99,15 +100,19 @@ func run() error {
 	})
 
 	registry := queue.NewRegistry()
+	renderEngine := render.New(render.Options{
+		Store: taskStore, Artifacts: taskStore, OutputDir: cfg.Storage.OutputDir, Reporter: reporter,
+	})
+
 	tasks.Register(registry, tasks.Deps{
 		Sidecar:   sidecarClient,
 		Providers: providers,
+		Projects:  taskStore,
+		Render:    renderEngine,
 	})
 
-	// The engine has no producer yet — nothing renders, so nothing recompiles.
-	// It is wired anyway so that the invalidation rate report is reachable from
-	// the first edit the first renderer ever makes, rather than after someone
-	// remembers to add the route.
+	// Wired from day one so the invalidation rate report is reachable from the
+	// first render, not after someone remembers to add the route.
 	recompiler := recompile.New(recompile.Options{
 		Cache:    taskStore,
 		Runs:     taskStore,
@@ -195,6 +200,7 @@ func run() error {
 		Compliance:   complianceEngine,
 		Visual:       visualEngine,
 		Hybrid:       hybridEngine,
+		Render:       renderEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,
