@@ -14,6 +14,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
+	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
@@ -49,6 +50,8 @@ type Deps struct {
 	Compliance *compliance.Engine
 	// Visual backs L2 style packs and the visual identity stack.
 	Visual *visual.Engine
+	// Hybrid backs per-seg visual route planning (AI / stock / Ken Burns / motion graphics).
+	Hybrid *hybrid.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -99,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/visual/packs/{id}/export", s.handleVisualPackExport)
 	mux.HandleFunc("POST /v1/visual/packs/import", s.handleVisualPackImport)
 	mux.HandleFunc("POST /v1/visual/packs/{id}/apply", s.handleVisualPackApply)
+	mux.HandleFunc("POST /v1/hybrid/plan", s.handleHybridPlan)
+	mux.HandleFunc("GET /v1/hybrid/plans/{project_id}", s.handleHybridPlans)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the
