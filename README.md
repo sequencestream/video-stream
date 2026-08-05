@@ -169,6 +169,12 @@ curl -s -X POST localhost:8080/v1/render/run \
 
 见 [`doc/arch/render.md`](doc/arch/render.md)。
 
+## 合规标识（强制）
+
+mux 之后注入 `content_attribute` / `service_provider_code` / `content_id` 并读回校验；失败则拒绝产出。YouTube 上传 `synthetic` 恒为 true。无关闭开关。
+
+见 [`doc/arch/label.md`](doc/arch/label.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -357,6 +363,8 @@ internal/compliance   inauthentic 三道闸（渲染前必经）
 internal/visual       L2 视觉样式包与身份栈
 internal/hybrid       混合画面路线（AI / stock / Ken Burns / motion graphics）
 internal/render       FFmpeg 渲染管线（720p/1080p 共享 context）
+internal/label        mux 后合规标识注入与读回校验（不可关闭）
+internal/youtube      YouTube 上传适配（synthetic 恒 true）
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler

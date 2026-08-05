@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/label"
 	"github.com/sequencestream/video-stream/internal/model"
 	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -171,5 +172,24 @@ func TestTelemetryReportsLLMOn720Only(t *testing.T) {
 	}
 	if llmEvents != 1 {
 		t.Fatalf("llm telemetry events = %d, want 1", llmEvents)
+	}
+}
+
+type brokenLabelInjector struct{}
+
+func (brokenLabelInjector) Inject(string, label.Label) error { return nil }
+
+func (brokenLabelInjector) Readback(string) (label.Label, error) {
+	return label.Label{}, label.ErrReadbackMismatch
+}
+
+func TestRenderRejectsBrokenLabelReadback(t *testing.T) {
+	ctx := context.Background()
+	eng := openEngine(t, render.Options{Labels: brokenLabelInjector{}})
+	_, err := eng.Run(ctx, render.RunRequest{
+		Project: sampleProject(t), Resolution: render.Resolution720p, RunID: "run-label-fail",
+	})
+	if err == nil || !errors.Is(err, render.ErrLabelRejected) {
+		t.Fatalf("got %v, want ErrLabelRejected", err)
 	}
 }

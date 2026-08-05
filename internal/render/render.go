@@ -37,6 +37,8 @@ var (
 	ErrNoStore = errors.New("render has no store configured")
 	// ErrPreviewRequired is returned when 1080p runs before a 720p preview stored shared context.
 	ErrPreviewRequired = errors.New("run a 720p preview before 1080p delivery")
+	// ErrLabelRejected means compliance label readback failed after mux.
+	ErrLabelRejected = errors.New("compliance label injection or readback failed")
 	// ErrRunNotFound is returned when a render run id is unknown.
 	ErrRunNotFound = errors.New("render run not found")
 )

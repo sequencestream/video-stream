@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/label"
 	"github.com/sequencestream/video-stream/internal/model"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/telemetry"
@@ -43,6 +44,7 @@ type Options struct {
 	Video     VideoGenerator
 	Prompts   PromptGenerator
 	Reporter  telemetry.Reporter
+	Labels    label.Injector
 	// StageHook is for tests: return an error to simulate a stage failure.
 	StageHook func(stage string) error
 }
@@ -56,6 +58,7 @@ type Engine struct {
 	video     VideoGenerator
 	prompts   PromptGenerator
 	reporter  telemetry.Reporter
+	labels    label.Injector
 	stageHook func(stage string) error
 }
 
@@ -64,7 +67,10 @@ func New(opts Options) *Engine {
 	e := &Engine{
 		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
 		ffmpeg: opts.FFmpeg, video: opts.Video, prompts: opts.Prompts,
-		reporter: opts.Reporter, stageHook: opts.StageHook,
+		reporter: opts.Reporter, stageHook: opts.StageHook, labels: opts.Labels,
+	}
+	if e.labels == nil {
+		e.labels = label.SidecarInjector{}
 	}
 	if e.ffmpeg == nil {
 		e.ffmpeg = StubFFmpeg{}
@@ -176,6 +182,14 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		run.Error = err.Error()
 		_ = e.store.UpdateRenderRun(ctx, run)
 		return RunResult{}, fmt.Errorf("mux: %w", err)
+	}
+
+	l := label.Build(req.Project.ID, req.RunID)
+	if err := label.InjectAndVerify(e.labels, outPath, l); err != nil {
+		run.Status = "failed"
+		run.Error = err.Error()
+		_ = e.store.UpdateRenderRun(ctx, run)
+		return RunResult{}, fmt.Errorf("%w: %v", ErrLabelRejected, err)
 	}
 
 	run.Status = "completed"
