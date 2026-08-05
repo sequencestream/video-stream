@@ -215,6 +215,39 @@ CREATE TABLE IF NOT EXISTS hybrid_shots (
 	updated_at     INTEGER NOT NULL,
 	PRIMARY KEY (project_id, seg_id)
 );
+
+CREATE TABLE IF NOT EXISTS render_runs (
+	id                   TEXT PRIMARY KEY,
+	project_id           TEXT NOT NULL,
+	resolution           TEXT NOT NULL,
+	status               TEXT NOT NULL,
+	finalized            INTEGER NOT NULL DEFAULT 0,
+	last_completed_stage TEXT NOT NULL DEFAULT '',
+	output_uri           TEXT NOT NULL DEFAULT '',
+	error                TEXT NOT NULL DEFAULT '',
+	updated_at           INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_render_runs_project ON render_runs(project_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS render_shared_context (
+	project_id       TEXT NOT NULL,
+	render_cache_key TEXT NOT NULL,
+	prompt           TEXT NOT NULL,
+	seed             TEXT NOT NULL,
+	ref_uri          TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (project_id, render_cache_key)
+);
+
+CREATE TABLE IF NOT EXISTS render_seg_artifacts (
+	run_id           TEXT NOT NULL,
+	project_id       TEXT NOT NULL,
+	seg_id           TEXT NOT NULL,
+	render_cache_key TEXT NOT NULL,
+	stage            TEXT NOT NULL,
+	uri              TEXT NOT NULL,
+	PRIMARY KEY (run_id, seg_id, stage)
+);
+CREATE INDEX IF NOT EXISTS idx_render_seg_project ON render_seg_artifacts(project_id, seg_id);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.

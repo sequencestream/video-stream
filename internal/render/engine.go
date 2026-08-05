@@ -1,0 +1,414 @@
+package render
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/sequencestream/video-stream/internal/model"
+	"github.com/sequencestream/video-stream/internal/store"
+	"github.com/sequencestream/video-stream/internal/telemetry"
+)
+
+// RunRequest starts or resumes a render.
+type RunRequest struct {
+	RunID      string
+	Project    model.Project
+	Resolution Resolution
+	Finalized  bool
+	IncludeBGM bool
+	ResumeFrom string
+}
+
+// RunResult is the outcome of a pipeline execution.
+type RunResult struct {
+	RunID           string                    `json:"run_id"`
+	ProjectID       string                    `json:"project_id"`
+	Resolution      Resolution                `json:"resolution"`
+	OutputURI       string                    `json:"output_uri"`
+	CompletedStages []string                  `json:"completed_stages"`
+	SharedContext   []SharedVisual            `json:"shared_context"`
+	SegArtifacts    []store.RenderSegArtifact `json:"seg_artifacts"`
+}
+
+// Options configures the Engine.
+type Options struct {
+	Store     store.RenderStore
+	Artifacts store.ArtifactStore
+	OutputDir string
+	FFmpeg    FFmpeg
+	Video     VideoGenerator
+	Prompts   PromptGenerator
+	Reporter  telemetry.Reporter
+	// StageHook is for tests: return an error to simulate a stage failure.
+	StageHook func(stage string) error
+}
+
+// Engine runs the staged FFmpeg pipeline.
+type Engine struct {
+	store     store.RenderStore
+	artifacts store.ArtifactStore
+	outputDir string
+	ffmpeg    FFmpeg
+	video     VideoGenerator
+	prompts   PromptGenerator
+	reporter  telemetry.Reporter
+	stageHook func(stage string) error
+}
+
+// New builds an Engine with sensible defaults for tests.
+func New(opts Options) *Engine {
+	e := &Engine{
+		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
+		ffmpeg: opts.FFmpeg, video: opts.Video, prompts: opts.Prompts,
+		reporter: opts.Reporter, stageHook: opts.StageHook,
+	}
+	if e.ffmpeg == nil {
+		e.ffmpeg = StubFFmpeg{}
+	}
+	if e.video == nil {
+		e.video = StubVideoGenerator{OutputDir: opts.OutputDir}
+	}
+	if e.prompts == nil {
+		e.prompts = NopPromptGenerator{}
+	}
+	if e.reporter == nil {
+		e.reporter = telemetry.Nop()
+	}
+	return e
+}
+
+// Run executes the pipeline, optionally resuming from ResumeFrom.
+func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
+	if e.store == nil {
+		return RunResult{}, ErrNoStore
+	}
+	if err := req.Resolution.Validate(); err != nil {
+		return RunResult{}, err
+	}
+	if req.IncludeBGM && !req.Finalized {
+		return RunResult{}, ErrNotFinalized
+	}
+	if e.outputDir == "" {
+		return RunResult{}, fmt.Errorf("render output dir is not configured")
+	}
+	if err := os.MkdirAll(e.outputDir, 0o755); err != nil {
+		return RunResult{}, err
+	}
+	if req.RunID == "" {
+		req.RunID = fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
+	}
+
+	stages := append([]string(nil), StageOrder...)
+	if req.IncludeBGM {
+		stages = append(stages, StageBGMBeat)
+	}
+
+	run, err := e.loadOrCreateRun(ctx, req)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	startIdx := 0
+	if req.ResumeFrom != "" {
+		startIdx, err = stageIndex(stages, req.ResumeFrom)
+		if err != nil {
+			return RunResult{}, err
+		}
+	} else if run.LastCompletedStage != "" && run.Status != "completed" {
+		startIdx, err = stageIndex(stages, run.LastCompletedStage)
+		if err != nil {
+			return RunResult{}, err
+		}
+		startIdx++
+	}
+
+	shared, err := e.resolveSharedContext(ctx, req)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	stageFiles, err := e.priorStageFiles(ctx, req, stages, startIdx)
+	if err != nil {
+		return RunResult{}, err
+	}
+	completed := stages[:startIdx]
+
+	for i := startIdx; i < len(stages); i++ {
+		stage := stages[i]
+		if stage == StageBGMBeat && !req.Finalized {
+			return RunResult{}, ErrNotFinalized
+		}
+		if e.stageHook != nil {
+			if err := e.stageHook(stage); err != nil {
+				run.Status = "failed"
+				run.Error = err.Error()
+				run.LastCompletedStage = lastOf(completed)
+				_ = e.store.UpdateRenderRun(ctx, run)
+				return RunResult{}, fmt.Errorf("stage %s: %w", stage, err)
+			}
+		}
+
+		files, err := e.runStage(ctx, req, stage, shared)
+		if err != nil {
+			run.Status = "failed"
+			run.Error = err.Error()
+			run.LastCompletedStage = lastOf(completed)
+			_ = e.store.UpdateRenderRun(ctx, run)
+			return RunResult{}, fmt.Errorf("stage %s: %w", stage, err)
+		}
+		stageFiles = append(stageFiles, files...)
+		completed = append(completed, stage)
+
+		run.LastCompletedStage = stage
+		run.Status = "running"
+		if err := e.store.UpdateRenderRun(ctx, run); err != nil {
+			return RunResult{}, err
+		}
+	}
+
+	outPath := filepath.Join(e.outputDir, req.Project.ID, string(req.Resolution)+".mp4")
+	if err := e.ffmpeg.Mux(ctx, outPath, stageFiles); err != nil {
+		run.Status = "failed"
+		run.Error = err.Error()
+		_ = e.store.UpdateRenderRun(ctx, run)
+		return RunResult{}, fmt.Errorf("mux: %w", err)
+	}
+
+	run.Status = "completed"
+	run.OutputURI = outPath
+	run.LastCompletedStage = stages[len(stages)-1]
+	if err := e.store.UpdateRenderRun(ctx, run); err != nil {
+		return RunResult{}, err
+	}
+
+	segArts, err := e.store.RenderSegArtifacts(ctx, req.RunID)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	_ = telemetry.Report(ctx, e.reporter, "render.completed", map[string]any{
+		"run_id": req.RunID, "project_id": req.Project.ID,
+		"resolution": req.Resolution, "stages": len(completed),
+	})
+
+	return RunResult{
+		RunID: req.RunID, ProjectID: req.Project.ID, Resolution: req.Resolution,
+		OutputURI: outPath, CompletedStages: completed,
+		SharedContext: shared, SegArtifacts: segArts,
+	}, nil
+}
+
+func (e *Engine) resolveSharedContext(ctx context.Context, req RunRequest) ([]SharedVisual, error) {
+	stored, err := e.loadSharedContext(ctx, req.Project.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(stored) > 0 {
+		return stored, nil
+	}
+	if req.Resolution == Resolution1080p {
+		return nil, ErrPreviewRequired
+	}
+
+	base := BuildSharedContext(req.Project)
+	enriched, err := e.prompts.Enrich(ctx, req.Project, base)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.saveSharedContext(ctx, req.Project.ID, enriched); err != nil {
+		return nil, err
+	}
+	_ = telemetry.Report(ctx, e.reporter, "render.llm_prompts", map[string]any{
+		"project_id": req.Project.ID, "keys": len(enriched),
+	})
+	return enriched, nil
+}
+
+func (e *Engine) priorStageFiles(ctx context.Context, req RunRequest, stages []string, startIdx int) ([]string, error) {
+	if startIdx == 0 {
+		return nil, nil
+	}
+	var files []string
+	for _, stage := range stages[:startIdx] {
+		switch stage {
+		case StageVisuals:
+			arts, err := e.store.RenderSegArtifacts(ctx, req.RunID)
+			if err != nil {
+				return nil, err
+			}
+			for _, a := range arts {
+				if a.Stage == StageVisuals {
+					files = append(files, a.URI)
+				}
+			}
+		case StageAudio, StageSubtitles, StageLoudness:
+			path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, stage+".wav")
+			files = append(files, path)
+		case StageBGMBeat:
+			path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, "bgm_aligned.wav")
+			files = append(files, path)
+		}
+	}
+	return files, nil
+}
+
+func (e *Engine) runStage(ctx context.Context, req RunRequest, stage string, shared []SharedVisual) ([]string, error) {
+	switch stage {
+	case StageVisuals:
+		return e.runVisuals(ctx, req, shared)
+	case StageAudio, StageSubtitles, StageLoudness:
+		path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, stage+".wav")
+		if err := writeStubFile(path, stage); err != nil {
+			return nil, err
+		}
+		return []string{path}, nil
+	case StageBGMBeat:
+		path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, "bgm_aligned.wav")
+		if err := writeStubFile(path, "bgm"); err != nil {
+			return nil, err
+		}
+		return []string{path}, nil
+	case StageMux:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnknownStage, stage)
+	}
+}
+
+func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []SharedVisual) ([]string, error) {
+	byKey := make(map[string]SharedVisual, len(shared))
+	for _, v := range shared {
+		byKey[v.RenderCacheKey] = v
+	}
+	var files []string
+	for _, s := range req.Project.Segs {
+		key := s.RenderCacheKey
+		if key == "" {
+			key = model.ComputeRenderCacheKey(s, req.Project.RenderProfile)
+		}
+		vis, ok := byKey[key]
+		if !ok {
+			return nil, fmt.Errorf("missing shared context for %s", key)
+		}
+		uri, err := e.video.Generate(ctx, VideoGenInput{
+			Resolution: req.Resolution, RenderCacheKey: key,
+			Prompt: vis.Prompt, Seed: vis.Seed, RefURI: vis.RefURI,
+		})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, uri)
+		rec := store.RenderSegArtifact{
+			RunID: req.RunID, ProjectID: req.Project.ID, SegID: s.SegID,
+			RenderCacheKey: key, Stage: StageVisuals, URI: uri,
+		}
+		if err := e.store.PutRenderSegArtifact(ctx, rec); err != nil {
+			return nil, err
+		}
+		if e.artifacts != nil {
+			_ = e.artifacts.PutArtifact(ctx, store.Artifact{
+				RenderCacheKey: key,
+				DurationMS:     s.DurationBudget.MaxMS,
+				URI:            uri,
+			})
+		}
+	}
+	return files, nil
+}
+
+func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.RenderRunRecord, error) {
+	if req.RunID != "" {
+		existing, err := e.store.GetRenderRun(ctx, req.RunID)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, store.ErrRenderRunNotFound) {
+			return store.RenderRunRecord{}, err
+		}
+	}
+	run := store.RenderRunRecord{
+		ID: req.RunID, ProjectID: req.Project.ID,
+		Resolution: string(req.Resolution), Status: "pending",
+		Finalized: req.Finalized,
+	}
+	if err := e.store.CreateRenderRun(ctx, run); err != nil {
+		return store.RenderRunRecord{}, err
+	}
+	return run, nil
+}
+
+func (e *Engine) saveSharedContext(ctx context.Context, projectID string, ctxs []SharedVisual) error {
+	recs := make([]store.RenderSharedContextRecord, len(ctxs))
+	for i, c := range ctxs {
+		recs[i] = store.RenderSharedContextRecord{
+			ProjectID: projectID, RenderCacheKey: c.RenderCacheKey,
+			Prompt: c.Prompt, Seed: c.Seed, RefURI: c.RefURI,
+		}
+	}
+	return e.store.PutRenderSharedContext(ctx, projectID, recs)
+}
+
+func (e *Engine) loadSharedContext(ctx context.Context, projectID string) ([]SharedVisual, error) {
+	recs, err := e.store.RenderSharedContext(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SharedVisual, len(recs))
+	for i, r := range recs {
+		out[i] = SharedVisual{
+			RenderCacheKey: r.RenderCacheKey, Prompt: r.Prompt,
+			Seed: r.Seed, RefURI: r.RefURI,
+		}
+	}
+	return out, nil
+}
+
+// TraceSeg finds artifacts for a seg across a completed run.
+func TraceSeg(artifacts []store.RenderSegArtifact, segID string) []store.RenderSegArtifact {
+	var out []store.RenderSegArtifact
+	for _, a := range artifacts {
+		if a.SegID == segID {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func stageIndex(stages []string, name string) (int, error) {
+	for i, s := range stages {
+		if s == name {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("%w: %s", ErrUnknownStage, name)
+}
+
+func lastOf(xs []string) string {
+	if len(xs) == 0 {
+		return ""
+	}
+	return xs[len(xs)-1]
+}
+
+// GetRun returns a render run and its seg artifacts.
+func (e *Engine) GetRun(ctx context.Context, runID string) (store.RenderRunRecord, []store.RenderSegArtifact, error) {
+	if e.store == nil {
+		return store.RenderRunRecord{}, nil, ErrNoStore
+	}
+	run, err := e.store.GetRenderRun(ctx, runID)
+	if errors.Is(err, store.ErrRenderRunNotFound) {
+		return store.RenderRunRecord{}, nil, ErrRunNotFound
+	}
+	if err != nil {
+		return store.RenderRunRecord{}, nil, err
+	}
+	arts, err := e.store.RenderSegArtifacts(ctx, runID)
+	if err != nil {
+		return store.RenderRunRecord{}, nil, err
+	}
+	return run, arts, nil
+}

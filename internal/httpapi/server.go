@@ -19,6 +19,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
+	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/scriptagents"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -52,6 +53,8 @@ type Deps struct {
 	Visual *visual.Engine
 	// Hybrid backs per-seg visual route planning (AI / stock / Ken Burns / motion graphics).
 	Hybrid *hybrid.Engine
+	// Render backs the FFmpeg staged pipeline (720p preview / 1080p delivery).
+	Render *render.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -104,6 +107,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/visual/packs/{id}/apply", s.handleVisualPackApply)
 	mux.HandleFunc("POST /v1/hybrid/plan", s.handleHybridPlan)
 	mux.HandleFunc("GET /v1/hybrid/plans/{project_id}", s.handleHybridPlans)
+	mux.HandleFunc("POST /v1/render/run", s.handleRenderRun)
+	mux.HandleFunc("GET /v1/render/runs/{id}", s.handleRenderRunByID)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the
