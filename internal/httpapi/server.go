@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/ideation"
@@ -43,6 +44,8 @@ type Deps struct {
 	Ideation *ideation.Engine
 	// ScriptAgents backs the multi-agent script polish loop.
 	ScriptAgents *scriptagents.Engine
+	// Compliance backs the three inauthentic-differentiation gates before render.
+	Compliance *compliance.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -86,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/ideation/topics", s.handleIdeationTopics)
 	mux.HandleFunc("POST /v1/ideation/recall", s.handleIdeationRecall)
 	mux.HandleFunc("POST /v1/script/polish", s.handleScriptPolish)
+	mux.HandleFunc("POST /v1/compliance/check", s.handleComplianceCheck)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the

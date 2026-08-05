@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/httpapi"
@@ -139,6 +140,21 @@ func run() error {
 		Logger:   logger,
 	})
 
+	complianceEngine, err := compliance.New(compliance.Options{
+		Store: taskStore,
+		Config: compliance.Config{
+			RejectSimilarity: cfg.Compliance.RejectSimilarity,
+			PassSimilarity:   cfg.Compliance.PassSimilarity,
+			ReuseWindowDays:  cfg.Compliance.ReuseWindowDays,
+			MaxReuses:        cfg.Compliance.MaxReuses,
+		},
+		Reporter: reporter,
+		Logger:   logger,
+	})
+	if err != nil {
+		return err
+	}
+
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -171,6 +187,7 @@ func run() error {
 		Radar:       radarEngine,
 		Ideation:    ideationEngine,
 		ScriptAgents: scriptEngine,
+		Compliance:   complianceEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,

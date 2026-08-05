@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/compliance"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,6 +35,7 @@ type Config struct {
 	Providers   []Provider  `yaml:"providers"`
 	Radar       Radar       `yaml:"radar"`
 	ScriptAgents ScriptAgents `yaml:"script_agents"`
+	Compliance   Compliance   `yaml:"compliance"`
 }
 
 // Radar controls the competitor radar polling schedule and rate limits.
@@ -55,6 +57,14 @@ type ScriptAgents struct {
 	MaxNewIssues         int     `yaml:"max_new_issues"`
 	StagnantRounds       int     `yaml:"stagnant_rounds"`
 	CostPer1KTokensMicros int64  `yaml:"cost_per_1k_tokens_micros"`
+}
+
+// Compliance controls inauthentic-differentiation gate thresholds.
+type Compliance struct {
+	RejectSimilarity float64 `yaml:"reject_similarity"`
+	PassSimilarity   float64 `yaml:"pass_similarity"`
+	ReuseWindowDays  int     `yaml:"reuse_window_days"`
+	MaxReuses        int     `yaml:"max_reuses"`
 }
 
 // Server holds the HTTP listener settings of the main service.
@@ -175,6 +185,12 @@ func Default() Config {
 			StagnantRounds:       2,
 			CostPer1KTokensMicros: 500,
 		},
+		Compliance: Compliance{
+			RejectSimilarity: 0.85,
+			PassSimilarity:   0.70,
+			ReuseWindowDays:  30,
+			MaxReuses:        3,
+		},
 	}
 }
 
@@ -230,6 +246,10 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.ScriptAgents.MaxNewIssues, "VS_SCRIPT_MAX_NEW_ISSUES")
 	setInt(&cfg.ScriptAgents.StagnantRounds, "VS_SCRIPT_STAGNANT_ROUNDS")
 	setInt64(&cfg.ScriptAgents.CostPer1KTokensMicros, "VS_SCRIPT_COST_PER_1K_TOKENS_MICROS")
+	setFloat(&cfg.Compliance.RejectSimilarity, "VS_COMPLIANCE_REJECT_SIMILARITY")
+	setFloat(&cfg.Compliance.PassSimilarity, "VS_COMPLIANCE_PASS_SIMILARITY")
+	setInt(&cfg.Compliance.ReuseWindowDays, "VS_COMPLIANCE_REUSE_WINDOW_DAYS")
+	setInt(&cfg.Compliance.MaxReuses, "VS_COMPLIANCE_MAX_REUSES")
 }
 
 // Validate rejects configurations that would fail later in confusing ways.
@@ -269,6 +289,14 @@ func (c Config) Validate() error {
 	}
 	if c.ScriptAgents.StagnantRounds < 1 {
 		return fmt.Errorf("script_agents.stagnant_rounds must be at least 1")
+	}
+	if err := (compliance.Config{
+		RejectSimilarity: c.Compliance.RejectSimilarity,
+		PassSimilarity:   c.Compliance.PassSimilarity,
+		ReuseWindowDays:  c.Compliance.ReuseWindowDays,
+		MaxReuses:        c.Compliance.MaxReuses,
+	}).Effective().Validate(); err != nil {
+		return fmt.Errorf("compliance: %w", err)
 	}
 	seen := make(map[string]bool, len(c.Providers))
 	for _, p := range c.Providers {
