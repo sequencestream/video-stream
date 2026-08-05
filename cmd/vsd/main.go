@@ -17,6 +17,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/httpapi"
+	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/logging"
 	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
@@ -118,6 +119,12 @@ func run() error {
 		Logger:   logger,
 	})
 
+	ideationEngine := ideation.New(ideation.Options{
+		Store:    taskStore,
+		Reporter: reporter,
+		Logger:   logger,
+	})
+
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -148,6 +155,7 @@ func run() error {
 		Credentials: credentials,
 		Recompile:   recompiler,
 		Radar:       radarEngine,
+		Ideation:    ideationEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,

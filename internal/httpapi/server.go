@@ -13,6 +13,7 @@ import (
 
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
+	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
@@ -36,6 +37,9 @@ type Deps struct {
 	// routes registered and answering with empty collections, because "nothing
 	// watched yet" is the honest state rather than a missing route.
 	Radar *radar.Engine
+	// Ideation backs structure card extraction and cross-category topic migration.
+	// Nil leaves routes registered with empty collections for the same reason.
+	Ideation *ideation.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -72,6 +76,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/radar/signals", s.handleRadarSignals)
 	mux.HandleFunc("POST /v1/radar/ingest", s.handleRadarIngest)
 	mux.HandleFunc("POST /v1/radar/poll", s.handleRadarPoll)
+	mux.HandleFunc("POST /v1/ideation/extract", s.handleIdeationExtract)
+	mux.HandleFunc("GET /v1/ideation/cards", s.handleIdeationCards)
+	mux.HandleFunc("GET /v1/ideation/cards/{id}", s.handleIdeationCardByID)
+	mux.HandleFunc("POST /v1/ideation/migrate", s.handleIdeationMigrate)
+	mux.HandleFunc("GET /v1/ideation/topics", s.handleIdeationTopics)
+	mux.HandleFunc("POST /v1/ideation/recall", s.handleIdeationRecall)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the

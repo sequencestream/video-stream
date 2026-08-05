@@ -91,6 +91,24 @@ curl -s 'localhost:8080/v1/radar/signals?hot=true' | jq
 
 数据来源、合规边界、阈值为何写死，见 [`doc/arch/radar.md`](doc/arch/radar.md)。
 
+## 结构卡片与跨类目选题
+
+雷达给出「什么在爆」，`internal/ideation` 回答「怎么把结构迁到你的类目」。结构卡片只存形式六维（hook、前 3 秒视觉、节拍、信息密度、情绪动线、争议锚点），**绝不迁事实**；图边记录卡片关系，向量只做召回候选。
+
+```bash
+# 从爆款元数据提取结构卡
+curl -s -X POST localhost:8080/v1/ideation/extract \
+  -H 'Content-Type: application/json' \
+  -d '{"post_id":"p1","category":"cooking","title":"Why does sourdough crack?","duration_seconds":45}'
+
+# 跨类目迁移 → 3–5 张选题卡
+curl -s -X POST localhost:8080/v1/ideation/migrate \
+  -H 'Content-Type: application/json' \
+  -d '{"structure_card_id":"<id>","user_theme":"home fitness","target_category":"fitness"}'
+```
+
+六维断言、图查询与向量召回回归，见 [`doc/arch/ideation.md`](doc/arch/ideation.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -204,6 +222,12 @@ vs credential status                           # 每个 provider 的密钥来自
 | GET | `/v1/radar/signals` | 热点信号列表；`?hot=true` 仅返回超阈值帖 |
 | POST | `/v1/radar/ingest` | 写入一批公开指标观测（评论正文不落库） |
 | POST | `/v1/radar/poll` | 触发一轮轮询（无注册 source 时计 no_source） |
+| POST | `/v1/ideation/extract` | 提取结构卡片（六维、去领域化） |
+| GET | `/v1/ideation/cards` | 结构卡片列表；`?category=` 可筛选 |
+| GET | `/v1/ideation/cards/{id}` | 单张结构卡 + 图邻居 |
+| POST | `/v1/ideation/migrate` | 跨类目迁移，产出 3–5 选题卡 |
+| GET | `/v1/ideation/topics` | 选题卡列表；`?card_id=` 可筛选 |
+| POST | `/v1/ideation/recall` | 向量召回 top-k 结构卡 |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -257,6 +281,7 @@ internal/telemetry   埋点上报接口
 internal/model       核心数据模型：seg 图、词级时间戳、派生 hash、schema 迁移
 internal/recompile   增量重编译：失效传播、六条边界、失效率报告
 internal/radar       竞品雷达：残差热点、四项衍生测度、限速轮询
+internal/ideation    结构卡片提取、图存储、向量召回、跨类目选题
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler

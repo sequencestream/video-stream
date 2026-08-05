@@ -129,6 +129,47 @@ CREATE TABLE IF NOT EXISTS radar_observations (
 );
 CREATE INDEX IF NOT EXISTS idx_radar_obs_account ON radar_observations(account_id, published_at);
 CREATE INDEX IF NOT EXISTS idx_radar_obs_post ON radar_observations(post_id, observed_at);
+
+-- structure_cards holds domain-neutral decompositions of viral works. The six
+-- dimension columns are the authoritative structure; embedding is recall-only.
+CREATE TABLE IF NOT EXISTS structure_cards (
+	id                 TEXT PRIMARY KEY,
+	source_post_id     TEXT NOT NULL DEFAULT '',
+	source_category    TEXT NOT NULL DEFAULT '',
+	hook_type          TEXT NOT NULL DEFAULT '',
+	opening_visual     TEXT NOT NULL DEFAULT '',
+	beat_sequence      TEXT NOT NULL DEFAULT '',
+	density_curve      TEXT NOT NULL DEFAULT '',
+	emotion_arc        TEXT NOT NULL DEFAULT '',
+	controversy_anchor TEXT NOT NULL DEFAULT '',
+	embedding          TEXT NOT NULL DEFAULT '[]',
+	created_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_structure_cards_category ON structure_cards(source_category, created_at);
+
+-- structure_edges is the graph over cards. Vectors recall candidates; edges
+-- record structural relationships the product can traverse explicitly.
+CREATE TABLE IF NOT EXISTS structure_edges (
+	from_id    TEXT NOT NULL REFERENCES structure_cards(id) ON DELETE CASCADE,
+	to_id      TEXT NOT NULL REFERENCES structure_cards(id) ON DELETE CASCADE,
+	rel        TEXT NOT NULL DEFAULT 'similar',
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (from_id, to_id, rel)
+);
+
+-- topic_cards are cross-category ideas migrated from one structure card.
+CREATE TABLE IF NOT EXISTS topic_cards (
+	id                TEXT PRIMARY KEY,
+	structure_card_id TEXT NOT NULL REFERENCES structure_cards(id) ON DELETE CASCADE,
+	title             TEXT NOT NULL DEFAULT '',
+	angle             TEXT NOT NULL DEFAULT '',
+	migration_source  TEXT NOT NULL DEFAULT '',
+	why_fits          TEXT NOT NULL DEFAULT '',
+	target_category   TEXT NOT NULL DEFAULT '',
+	user_theme        TEXT NOT NULL DEFAULT '',
+	created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_topic_cards_structure ON topic_cards(structure_card_id, created_at);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.
