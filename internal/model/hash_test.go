@@ -131,7 +131,7 @@ func TestRenderCacheKeyCoversRenderedAppearance(t *testing.T) {
 	profile := model.RenderProfile{}
 	baseKey := model.ComputeRenderCacheKey(base, profile)
 
-	if !strings.HasPrefix(baseKey, "rk1:") {
+	if !strings.HasPrefix(baseKey, "rk2:") {
 		t.Fatalf("render cache key %q is missing its version prefix", baseKey)
 	}
 	if got := model.ComputeRenderCacheKey(base, profile); got != baseKey {
@@ -162,6 +162,31 @@ func TestRenderCacheKeyCoversRenderedAppearance(t *testing.T) {
 	t.Run("changes with the render profile", func(t *testing.T) {
 		if model.ComputeRenderCacheKey(base, model.RenderProfile{Voice: "xiaoyun"}) == baseKey {
 			t.Fatal("a voice change did not move the render cache key")
+		}
+	})
+
+	// SegsByRenderCacheKey looks across every project in the database. If the
+	// style anchor stayed out of the key, two projects with the same wording
+	// and different visual identities would share one key, and a lookup in one
+	// would return the other's frames.
+	t.Run("changes with the style anchor", func(t *testing.T) {
+		if model.ComputeRenderCacheKey(base, model.RenderProfile{StyleAnchor: "l2-noir"}) == baseKey {
+			t.Fatal("a style anchor change did not move the render cache key")
+		}
+	})
+
+	// These two say which segs must be recompiled together, not what any one
+	// artifact looks like. In the key they would give two visually identical
+	// shots different keys and throw away a legitimate cache hit.
+	t.Run("ignores the recompile grouping fields", func(t *testing.T) {
+		grouped := base
+		grouped.ContinuityGroup = "chase"
+		grouped.GenerationBatch = "batch-7"
+		if got := model.ComputeRenderCacheKey(grouped, profile); got != baseKey {
+			t.Fatal("a grouping field moved the render cache key")
+		}
+		if got := model.ComputeContentHash(grouped); got != model.ComputeContentHash(base) {
+			t.Fatal("a grouping field moved the content hash")
 		}
 	})
 }

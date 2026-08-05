@@ -53,6 +53,34 @@ CREATE TABLE IF NOT EXISTS segs (
 );
 CREATE INDEX IF NOT EXISTS idx_segs_render_cache_key ON segs(render_cache_key);
 CREATE INDEX IF NOT EXISTS idx_segs_content_hash ON segs(content_hash);
+
+-- artifacts is keyed by render_cache_key rather than by seg, because two segs
+-- with identical content legitimately share one rendered product. It carries
+-- the artifact's real duration, which is the half of the reuse test that the
+-- seg cannot answer for itself.
+CREATE TABLE IF NOT EXISTS artifacts (
+	render_cache_key TEXT PRIMARY KEY,
+	duration_ms      INTEGER NOT NULL,
+	uri              TEXT NOT NULL DEFAULT '',
+	cost_micros      INTEGER NOT NULL DEFAULT 0,
+	created_at       INTEGER NOT NULL
+);
+
+-- recompile_runs is the evidence behind the invalidation rate. The CHECK is
+-- there because a run claiming more invalidated segs than it had would quietly
+-- push the reported rate above 100%.
+CREATE TABLE IF NOT EXISTS recompile_runs (
+	id                TEXT PRIMARY KEY,
+	project_id        TEXT NOT NULL,
+	planned_at        INTEGER NOT NULL,
+	total_segs        INTEGER NOT NULL,
+	invalidated_segs  INTEGER NOT NULL,
+	full_rerun        INTEGER NOT NULL DEFAULT 0,
+	boundary          TEXT NOT NULL DEFAULT '',
+	cost_saved_micros INTEGER NOT NULL DEFAULT 0,
+	CHECK (total_segs >= 0 AND invalidated_segs >= 0 AND invalidated_segs <= total_segs)
+);
+CREATE INDEX IF NOT EXISTS idx_recompile_runs_project ON recompile_runs(project_id, planned_at);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.

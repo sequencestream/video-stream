@@ -12,8 +12,11 @@ import (
 // when a hashing rule changes the prefix changes with it, so old values are
 // recognisable and can be recomputed instead of silently failing to match.
 const (
-	contentHashPrefix    = "ch1:"
-	renderCacheKeyPrefix = "rk1:"
+	contentHashPrefix = "ch1:"
+	// rk2 adds style_anchor to the render cache key. rk1 omitted it, so an rk1
+	// value is not comparable with an rk2 one; the prefix is what keeps the two
+	// from silently matching.
+	renderCacheKeyPrefix = "rk2:"
 )
 
 // RenderProfile identifies the pipeline configuration that produced a rendered
@@ -26,6 +29,16 @@ const (
 type RenderProfile struct {
 	Voice    string `json:"voice,omitempty"`
 	Renderer string `json:"renderer,omitempty"`
+	// StyleAnchor identifies the visual identity the frames were rendered
+	// under. It is an opaque string here; the intent that builds the visual
+	// identity stack will give it structure.
+	//
+	// It has to be in the render cache key rather than only in the recompile
+	// boundary check, because SegsByRenderCacheKey is a cross-project lookup:
+	// without it, two projects with identical wording and different style
+	// anchors share a key, and one project's cache lookup returns the other
+	// project's frames.
+	StyleAnchor string `json:"style_anchor,omitempty"`
 }
 
 // ComputeContentHash derives the identity of what a seg says.
@@ -56,7 +69,12 @@ func ComputeContentHash(s Seg) string {
 // ComputeRenderCacheKey derives the identity of a reusable rendered artifact.
 //
 // It covers the content hash plus everything baked into the rendered frames:
-// the visual slot, the subtitle wrap positions, and the render profile.
+// the visual slot, the subtitle wrap positions, and the render profile
+// including its style anchor.
+//
+// It does not cover continuity_group or generation_batch. Those describe which
+// segs have to be recompiled together, not what any single artifact looks like;
+// folding them in would give two visually identical shots two different keys.
 //
 // It pointedly does NOT cover duration_budget. Folding the budget in would mean
 // that widening or nudging a budget throws away artifacts whose actual duration
@@ -71,6 +89,7 @@ func ComputeRenderCacheKey(s Seg, profile RenderProfile) string {
 	writeField(h, "breaks", formatInts(s.SubtitleBreaks))
 	writeField(h, "voice", profile.Voice)
 	writeField(h, "renderer", profile.Renderer)
+	writeField(h, "style_anchor", profile.StyleAnchor)
 	return renderCacheKeyPrefix + hex.EncodeToString(h.Sum(nil))
 }
 

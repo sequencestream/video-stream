@@ -1,6 +1,6 @@
 # video-stream
 
-本地优先的 AI 视频生产流水线。当前仓库处于**工程骨架 + 核心数据模型**阶段：架构、进程边界、任务队列、配置、可观测性，以及描述视频本身的那套数据结构已经落地，具体的视频生产能力由后续意图填充。
+本地优先的 AI 视频生产流水线。当前仓库处于**工程骨架 + 核心数据模型 + 增量重编译引擎**阶段：架构、进程边界、任务队列、配置、可观测性，描述视频本身的那套数据结构，以及"改一句话该重渲染哪些片段"的算法与失效率埋点都已落地；真正的渲染执行由后续意图填充。
 
 ## 架构
 
@@ -23,6 +23,7 @@
 - 两者通过 loopback HTTP 通信，Go 侧唯一出口是 `internal/sidecar`。
 - **密钥用户自持**：仓库不托管任何凭据，密钥只存在于用户自己的系统钥匙串或加密文件里，配置文件中没有存放密钥的字段。见 [`doc/arch/credentials.md`](doc/arch/credentials.md)。
 - **核心数据模型**：`internal/model` 定义 seg 图与词级时间戳三层。其中 `duration_budget` 是浮动区间而非定值——增量重编译只有在这个前提下才成立。见 [`doc/arch/data-model.md`](doc/arch/data-model.md)。
+- **增量重编译**：`internal/recompile` 算出一次编辑该重渲染哪些 seg，并把每次的失效率记进库。它交付的第一件东西不是加速，而是**失效率这个数字**——超过 40% 就该承认这条路走不通。见 [`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md)。
 
 ## 核心数据模型
 
@@ -39,6 +40,30 @@ Project ──┬─ Seg[]      seg 图：说什么、允许多长、依赖谁�
 `content_hash` 标识「说了什么」，`render_cache_key` 标识「产物能否复用」，两者都带版本前缀、
 逐字段长度前缀编码，且**都不覆盖 `duration_budget`**。完整字段语义、每个字段在 MVP 阶段
 是否有消费者、hash 的稳定性保证，见 [`doc/arch/data-model.md`](doc/arch/data-model.md)。
+
+## 增量重编译
+
+改一句话，只重渲染受影响的片段——这是本项目最大的技术赌注。`internal/recompile` 交付的
+不是加速，而是**判断这个赌注是否成立所需的那个数字**：
+
+```
+invalidation_rate = Σ invalidated_segs / Σ total_segs    按 seg 加权，不按 run 平均
+```
+
+引擎对比前后两份 project，沿 `depends_on` 反向边求失效闭包，再逐个 seg 用
+`Seg.CanReuse` 查缓存。另有**六条边界**——视觉基调变更、总时长漂移 >15%、情绪节拍重排、
+开场改动、连续动作组被切开、多镜生成批次被切开——增量地做在技术上可以硬算，但成片是错的，
+遇到就诚实地整片重来并记下是哪一条。
+
+阈值写死在看到任何数据之前：失效率 > **40%** 判 `scrap`，不足 **20** 次记录判
+`insufficient_data`（不默认成"可行"）。查看当前数字：
+
+```bash
+curl -s localhost:8080/v1/recompile/report | jq
+```
+
+失效传播算法、六条边界的判定顺序、为什么按 seg 加权，见
+[`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md)。
 
 ## 快速开始
 
@@ -147,6 +172,7 @@ vs credential status                           # 每个 provider 的密钥来自
 | POST | `/v1/tasks` | 提交任务 |
 | GET | `/v1/tasks` | 列出任务 |
 | GET | `/v1/tasks/{id}` | 查询任务 |
+| GET | `/v1/recompile/report` | 增量重编译失效率报告；`?project=<id>` 可限定单个工程 |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -198,7 +224,8 @@ internal/provider    模型供应商调用，密钥用时才取
 internal/logging     结构化日志
 internal/telemetry   埋点上报接口
 internal/model       核心数据模型：seg 图、词级时间戳、派生 hash、schema 迁移
-internal/store       SQLite 持久化：任务与视频工程
+internal/recompile   增量重编译：失效传播、六条边界、失效率报告
+internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler
 internal/sidecar     sidecar 契约与客户端
@@ -217,3 +244,5 @@ webui/               Next.js 7 步向导空壳（源码）
 密钥方面明确不做：云端密钥托管、团队共享凭据、MVP 阶段的浏览器 cookie 抓取。
 
 数据模型方面明确不做：编辑标签求值（`filler` / `silence` 在纯 TTS 通路下无输入可处理）、可视化时间轴编辑器、`/v1/projects` HTTP 入口、数据库 DDL 迁移框架。理由见 [`doc/arch/data-model.md`](doc/arch/data-model.md) 的「明确不做」。
+
+增量重编译方面明确不做：真的去执行渲染（引擎只产出计划）、自适应阈值、边界的可配置化、产物垃圾回收。理由见 [`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md) 的「明确不做」。

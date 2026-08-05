@@ -256,8 +256,22 @@ type Seg struct {
 	SubtitleBreaks []int `json:"subtitle_breaks,omitempty"`
 	// DependsOn lists seg ids that must be resolved before this one.
 	DependsOn []string `json:"depends_on,omitempty"`
+	// ContinuityGroup names a run of segs that form one continuous physical
+	// action, so a cut inside the group would be visible. Segs sharing a group
+	// cannot be recompiled independently; see the recompile package.
+	//
+	// It is grouping metadata, not content: neither hash covers it.
+	ContinuityGroup string `json:"continuity_group,omitempty"`
+	// GenerationBatch names the segs that came out of a single multi-shot
+	// generation call. The shots in a batch were conditioned on each other, so
+	// regenerating one alone produces a shot that no longer matches its
+	// neighbours.
+	//
+	// It is grouping metadata, not content: neither hash covers it.
+	GenerationBatch string `json:"generation_batch,omitempty"`
 	// RenderCacheKey identifies a reusable rendered artifact. Derived; see
-	// ComputeRenderCacheKey. No consumer in the MVP — there is no renderer yet.
+	// ComputeRenderCacheKey. Consumed by the recompile engine's cache lookup;
+	// no renderer produces the artifacts it resolves to yet.
 	RenderCacheKey string `json:"render_cache_key"`
 	// Protected marks a seg the user has locked; regeneration must not
 	// overwrite it. No consumer in the MVP — there is no regeneration path yet.

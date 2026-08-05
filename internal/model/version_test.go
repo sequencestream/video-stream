@@ -4,16 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/sequencestream/video-stream/internal/model"
 )
 
-// v1 is the first schema version, so DefaultMigrator holds no steps and there
-// is no real upgrade to exercise. The chain logic is instead driven through a
-// migrator built for a longer, fictional history; registering a fake historical
-// migration in production code just to have something to test would be worse.
+// DefaultMigrator holds exactly one real step (v1 to v2), which the tests at
+// the bottom of this file exercise directly. The chain logic — ordering, gaps,
+// overshoot — needs a longer history than the one that exists, so it is driven
+// through migrators built for a fictional one; registering fake historical
+// migrations in production code just to have something to test would be worse.
 
 func TestDefaultMigratorLeavesACurrentDocumentUntouched(t *testing.T) {
 	raw := []byte(fmt.Sprintf(`{"schema_version":%d,"id":"p1"}`, model.SchemaVersion))
@@ -181,5 +183,118 @@ func TestMigrateRefusesAMalformedVersion(t *testing.T) {
 				t.Fatalf("%s should have been rejected", run.name)
 			}
 		})
+	}
+}
+
+// v1Document forges a document as v1 would have written it: sealed by this
+// binary, then stamped back to v1 with the pre-rk2 cache keys a v1 seal would
+// have produced. No exported call can produce this state, which is precisely
+// why the migration exists.
+func v1Document(t *testing.T, p model.Project) []byte {
+	t.Helper()
+
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("encode project: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode project: %v", err)
+	}
+	doc["schema_version"] = float64(1)
+
+	segs, _ := doc["segs"].([]any)
+	for i, entry := range segs {
+		seg, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("seg %d is not an object", i)
+		}
+		key, _ := seg["render_cache_key"].(string)
+		// A v1 key had the old prefix and no style anchor folded in; the digest
+		// after the prefix is irrelevant, only that it disagrees with a v2
+		// recomputation.
+		seg["render_cache_key"] = "rk1:" + strings.TrimPrefix(key, "rk2:")
+	}
+
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encode v1 document: %v", err)
+	}
+	return out
+}
+
+// Every v1 render_cache_key disagrees with a v2 recomputation, so a document
+// that skipped the migration would read back fine and then fail Validate on the
+// next save with ErrStaleDerived — blaming the caller for the schema bump.
+func TestMigratingV1ResealsTheRenderCacheKeys(t *testing.T) {
+	a := model.NewSeg("a", "first line", 1000)
+	b := model.NewSeg("b", "second line", 1000)
+	b.DependsOn = []string{"a"}
+	want := newTestProject(t, a, b)
+
+	out, err := model.DefaultMigrator.Migrate(v1Document(t, want))
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	var got model.Project
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode migrated project: %v", err)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("the migrated project is still stale: %v", err)
+	}
+	for i, seg := range got.Segs {
+		if seg.RenderCacheKey != want.Segs[i].RenderCacheKey {
+			t.Fatalf("seg %s key = %q, want %q", seg.SegID, seg.RenderCacheKey, want.Segs[i].RenderCacheKey)
+		}
+	}
+}
+
+// Resealing must not quietly rewrite authored content while it fixes the
+// derived fields; only the keys were wrong.
+func TestMigratingV1PreservesAuthoredContent(t *testing.T) {
+	seg := model.NewSeg("a", "增量重编译是这件事的支点", 2000)
+	seg.EmotionTag = model.EmotionSerious
+	seg.Protected = true
+	seg.SubtitleBreaks = []int{3}
+	want := newTestProject(t, seg)
+
+	out, err := model.DefaultMigrator.Migrate(v1Document(t, want))
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	var got model.Project
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode migrated project: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("migration changed the project:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// The v2 fields are all optional, so a v1 document that never had them must
+// come out with their zero values rather than failing to decode.
+func TestMigratingV1LeavesTheNewFieldsEmpty(t *testing.T) {
+	p := newTestProject(t, model.NewSeg("a", "first line", 1000))
+
+	out, err := model.DefaultMigrator.Migrate(v1Document(t, p))
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	var got model.Project
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode migrated project: %v", err)
+	}
+	if got.Segs[0].ContinuityGroup != "" || got.Segs[0].GenerationBatch != "" {
+		t.Fatalf("the v2 grouping fields were invented: %+v", got.Segs[0])
+	}
+	if got.RenderProfile.StyleAnchor != "" {
+		t.Fatalf("the v2 style anchor was invented: %q", got.RenderProfile.StyleAnchor)
+	}
+	if got.SchemaVersion != 2 {
+		t.Fatalf("schema_version = %d, want 2", got.SchemaVersion)
 	}
 }

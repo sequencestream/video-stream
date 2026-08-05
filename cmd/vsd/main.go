@@ -20,6 +20,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/logging"
 	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
+	"github.com/sequencestream/video-stream/internal/recompile"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/tasks"
@@ -97,6 +98,17 @@ func run() error {
 		Providers: providers,
 	})
 
+	// The engine has no producer yet — nothing renders, so nothing recompiles.
+	// It is wired anyway so that the invalidation rate report is reachable from
+	// the first edit the first renderer ever makes, rather than after someone
+	// remembers to add the route.
+	recompiler := recompile.New(recompile.Options{
+		Cache:    taskStore,
+		Runs:     taskStore,
+		Reporter: reporter,
+		Logger:   logger,
+	})
+
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -121,6 +133,7 @@ func run() error {
 		Queue:       q,
 		Sidecar:     sidecarClient,
 		Credentials: credentials,
+		Recompile:   recompiler,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,
