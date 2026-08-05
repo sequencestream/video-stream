@@ -24,6 +24,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/visual"
+	"github.com/sequencestream/video-stream/internal/wizard"
 )
 
 // Deps are the collaborators the HTTP handlers need.
@@ -55,6 +56,8 @@ type Deps struct {
 	Hybrid *hybrid.Engine
 	// Render backs the FFmpeg staged pipeline (720p preview / 1080p delivery).
 	Render *render.Engine
+	// Wizard backs the end-to-end seven-step product flow.
+	Wizard *wizard.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -109,6 +112,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/hybrid/plans/{project_id}", s.handleHybridPlans)
 	mux.HandleFunc("POST /v1/render/run", s.handleRenderRun)
 	mux.HandleFunc("GET /v1/render/runs/{id}", s.handleRenderRunByID)
+	mux.HandleFunc("POST /v1/wizard/sessions", s.handleWizardCreate)
+	mux.HandleFunc("GET /v1/wizard/sessions/{id}", s.handleWizardGet)
+	mux.HandleFunc("POST /v1/wizard/sessions/{id}/advance", s.handleWizardAdvance)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the
