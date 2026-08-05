@@ -24,6 +24,7 @@
 - **密钥用户自持**：仓库不托管任何凭据，密钥只存在于用户自己的系统钥匙串或加密文件里，配置文件中没有存放密钥的字段。见 [`doc/arch/credentials.md`](doc/arch/credentials.md)。
 - **核心数据模型**：`internal/model` 定义 seg 图与词级时间戳三层。其中 `duration_budget` 是浮动区间而非定值——增量重编译只有在这个前提下才成立。见 [`doc/arch/data-model.md`](doc/arch/data-model.md)。
 - **增量重编译**：`internal/recompile` 算出一次编辑该重渲染哪些 seg，并把每次的失效率记进库。它交付的第一件东西不是加速，而是**失效率这个数字**——超过 40% 就该承认这条路走不通。见 [`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md)。
+- **竞品雷达**：`internal/radar` 把用户导入的对标账号近 30 天公开指标校正为超预期残差，产出选题信号；不做全网爬虫。见 [`doc/arch/radar.md`](doc/arch/radar.md)。
 
 ## 核心数据模型
 
@@ -64,6 +65,31 @@ curl -s localhost:8080/v1/recompile/report | jq
 
 失效传播算法、六条边界的判定顺序、为什么按 seg 加权，见
 [`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md)。
+
+## 竞品雷达
+
+热点是脚本生成的输入源，但全网爬虫的合规与稳定性风险与其价值不成比例。`internal/radar` 的赌注是：**用户自己导入 5–20 个对标账号，加上自有账号后台数据，是唯一零灰区信号，且已覆盖约 90% 的价值。**
+
+「热」不是播放量，是校正后的超预期残差：
+
+```
+score = max(view_z, save_rate_z, completion_z)
+hot   ⇔ score ≥ 2.0
+```
+
+引擎按类目拟合 log-log 基线，用 48 小时成熟度曲线校正帖子年龄，再算 z 分。四项衍生测度——身份错配度、保存率/完播率二阶导、创作成本套利窗口、评论区未答问句密度——各自独立实现；评论正文不持久化，只存计数。
+
+```bash
+# 导入对标账号
+curl -s -X POST localhost:8080/v1/radar/accounts \
+  -H 'Content-Type: application/json' \
+  -d '{"platform":"douyin","handle":"cook_daily","category":"cooking","followers":12000}'
+
+# 查看热点信号（也可 POST /v1/radar/ingest 写入观测数据）
+curl -s 'localhost:8080/v1/radar/signals?hot=true' | jq
+```
+
+数据来源、合规边界、阈值为何写死，见 [`doc/arch/radar.md`](doc/arch/radar.md)。
 
 ## 快速开始
 
@@ -173,6 +199,11 @@ vs credential status                           # 每个 provider 的密钥来自
 | GET | `/v1/tasks` | 列出任务 |
 | GET | `/v1/tasks/{id}` | 查询任务 |
 | GET | `/v1/recompile/report` | 增量重编译失效率报告；`?project=<id>` 可限定单个工程 |
+| GET | `/v1/radar/accounts` | 竞品雷达：已导入的对标账号列表；`?platform=` 可筛选 |
+| POST | `/v1/radar/accounts` | 导入一个对标账号（上限 20） |
+| GET | `/v1/radar/signals` | 热点信号列表；`?hot=true` 仅返回超阈值帖 |
+| POST | `/v1/radar/ingest` | 写入一批公开指标观测（评论正文不落库） |
+| POST | `/v1/radar/poll` | 触发一轮轮询（无注册 source 时计 no_source） |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -225,6 +256,7 @@ internal/logging     结构化日志
 internal/telemetry   埋点上报接口
 internal/model       核心数据模型：seg 图、词级时间戳、派生 hash、schema 迁移
 internal/recompile   增量重编译：失效传播、六条边界、失效率报告
+internal/radar       竞品雷达：残差热点、四项衍生测度、限速轮询
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler
@@ -246,3 +278,5 @@ webui/               Next.js 7 步向导空壳（源码）
 数据模型方面明确不做：编辑标签求值（`filler` / `silence` 在纯 TTS 通路下无输入可处理）、可视化时间轴编辑器、`/v1/projects` HTTP 入口、数据库 DDL 迁移框架。理由见 [`doc/arch/data-model.md`](doc/arch/data-model.md) 的「明确不做」。
 
 增量重编译方面明确不做：真的去执行渲染（引擎只产出计划）、自适应阈值、边界的可配置化、产物垃圾回收。理由见 [`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md) 的「明确不做」。
+
+竞品雷达方面明确不做：全网热点爬虫、全局最佳发布时间预测、评论区自动回复、评论正文持久化、MVP 内置平台 scraper。理由见 [`doc/arch/radar.md`](doc/arch/radar.md) 的「明确不做」。

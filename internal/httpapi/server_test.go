@@ -66,7 +66,7 @@ func TestAPIRoutesWinOverTheWebUI(t *testing.T) {
 	})
 	handler := NewServer(deps).Handler()
 
-	for _, path := range []string{"/healthz", "/readyz", "/v1/meta", "/v1/tasks", "/v1/recompile/report"} {
+	for _, path := range []string{"/healthz", "/readyz", "/v1/meta", "/v1/tasks", "/v1/recompile/report", "/v1/radar/accounts", "/v1/radar/signals"} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if strings.Contains(rec.Body.String(), "webui") {

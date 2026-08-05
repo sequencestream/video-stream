@@ -32,6 +32,19 @@ type Config struct {
 	Queue       Queue       `yaml:"queue"`
 	Credentials Credentials `yaml:"credentials"`
 	Providers   []Provider  `yaml:"providers"`
+	Radar       Radar       `yaml:"radar"`
+}
+
+// Radar controls the competitor radar polling schedule and rate limits.
+type Radar struct {
+	// Interval is how often the daemon polls watched accounts. Zero disables
+	// background polling; readings can still be ingested over HTTP.
+	Interval time.Duration `yaml:"interval"`
+	// PerMinute caps outbound requests to each platform. Zero means unlimited,
+	// which is appropriate for tests and local fixtures only.
+	PerMinute float64 `yaml:"per_minute"`
+	// Burst is how many requests may be sent back-to-back after an idle period.
+	Burst int `yaml:"burst"`
 }
 
 // Server holds the HTTP listener settings of the main service.
@@ -140,6 +153,11 @@ func Default() Config {
 		Logging:     Logging{Level: "info", Format: "json"},
 		Queue:       Queue{Workers: 2, Buffer: 64},
 		Credentials: Credentials{Backend: "auto"},
+		Radar: Radar{
+			Interval:  6 * time.Hour,
+			PerMinute: 6,
+			Burst:     1,
+		},
 	}
 }
 
@@ -187,6 +205,9 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.Queue.Buffer, "VS_QUEUE_BUFFER")
 	setString(&cfg.Credentials.Backend, "VS_CREDENTIALS_BACKEND")
 	setString(&cfg.Credentials.VaultPath, "VS_CREDENTIALS_VAULT_PATH")
+	setDuration(&cfg.Radar.Interval, "VS_RADAR_INTERVAL")
+	setFloat(&cfg.Radar.PerMinute, "VS_RADAR_PER_MINUTE")
+	setInt(&cfg.Radar.Burst, "VS_RADAR_BURST")
 }
 
 // Validate rejects configurations that would fail later in confusing ways.
@@ -208,6 +229,15 @@ func (c Config) Validate() error {
 	}
 	if c.Budget.MaxCostPerVideoUSD < 0 || c.Budget.DailyCapUSD < 0 {
 		return fmt.Errorf("budget caps must not be negative")
+	}
+	if c.Radar.Interval < 0 {
+		return fmt.Errorf("radar.interval must not be negative, got %s", c.Radar.Interval)
+	}
+	if c.Radar.PerMinute < 0 {
+		return fmt.Errorf("radar.per_minute must not be negative, got %g", c.Radar.PerMinute)
+	}
+	if c.Radar.Burst < 0 {
+		return fmt.Errorf("radar.burst must not be negative, got %d", c.Radar.Burst)
 	}
 	seen := make(map[string]bool, len(c.Providers))
 	for _, p := range c.Providers {

@@ -71,6 +71,14 @@ func ProviderKey(provider string) string {
 	return "provider/" + strings.TrimSpace(provider)
 }
 
+// PlatformKey is the credential key for a content platform account token.
+//
+// Platform tokens live beside provider keys under their own namespace so a
+// provider named "douyin" cannot collide with a platform of the same name.
+func PlatformKey(platform string) string {
+	return "platform/" + strings.TrimSpace(platform)
+}
+
 // validateKey rejects keys that would be ambiguous or awkward once passed to a
 // keychain CLI. Keys are constructed internally, so this guards against a
 // caller mistake rather than untrusted input.

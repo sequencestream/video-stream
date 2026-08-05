@@ -14,6 +14,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/queue"
+	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -31,6 +32,10 @@ type Deps struct {
 	// recorded" is the honest answer and a missing route would look like a
 	// deployment fault.
 	Recompile *recompile.Engine
+	// Radar backs the competitor watch list and hot-post signals. Nil leaves the
+	// routes registered and answering with empty collections, because "nothing
+	// watched yet" is the honest state rather than a missing route.
+	Radar *radar.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -62,6 +67,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tasks", s.handleListTasks)
 	mux.HandleFunc("GET /v1/tasks/{id}", s.handleGetTask)
 	mux.HandleFunc("GET /v1/recompile/report", s.handleRecompileReport)
+	mux.HandleFunc("GET /v1/radar/accounts", s.handleRadarAccounts)
+	mux.HandleFunc("POST /v1/radar/accounts", s.handleRadarAccounts)
+	mux.HandleFunc("GET /v1/radar/signals", s.handleRadarSignals)
+	mux.HandleFunc("POST /v1/radar/ingest", s.handleRadarIngest)
+	mux.HandleFunc("POST /v1/radar/poll", s.handleRadarPoll)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the

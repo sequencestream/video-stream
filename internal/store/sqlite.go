@@ -81,6 +81,54 @@ CREATE TABLE IF NOT EXISTS recompile_runs (
 	CHECK (total_segs >= 0 AND invalidated_segs >= 0 AND invalidated_segs <= total_segs)
 );
 CREATE INDEX IF NOT EXISTS idx_recompile_runs_project ON recompile_runs(project_id, planned_at);
+
+-- radar_accounts is the set of accounts the user chose to watch. It is capped
+-- in the radar package rather than here, because the cap is a rate-limit
+-- judgement and not a storage invariant. The UNIQUE is on (platform, handle)
+-- rather than on handle alone: the same creator name on two platforms is two
+-- accounts with two audiences.
+CREATE TABLE IF NOT EXISTS radar_accounts (
+	id             TEXT PRIMARY KEY,
+	platform       TEXT NOT NULL,
+	handle         TEXT NOT NULL,
+	display_name   TEXT NOT NULL DEFAULT '',
+	category       TEXT NOT NULL DEFAULT '',
+	followers      INTEGER NOT NULL DEFAULT 0,
+	owned          INTEGER NOT NULL DEFAULT 0,
+	added_at       INTEGER NOT NULL,
+	last_polled_at INTEGER NOT NULL DEFAULT 0,
+	CHECK (followers >= 0)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_accounts_handle ON radar_accounts(platform, handle);
+
+-- radar_observations holds one reading of one post's public metrics. The same
+-- post appears many times, once per polling round, and that is the point: the
+-- second derivative of the save and completion rates needs at least three
+-- readings, so an upsert on post_id would destroy the only input that measure
+-- has. This is the opposite of the artifacts table, where the newer row is the
+-- better measurement.
+CREATE TABLE IF NOT EXISTS radar_observations (
+	id                   TEXT PRIMARY KEY,
+	account_id           TEXT NOT NULL REFERENCES radar_accounts(id) ON DELETE CASCADE,
+	post_id              TEXT NOT NULL,
+	title                TEXT NOT NULL DEFAULT '',
+	duration_seconds     INTEGER NOT NULL DEFAULT 0,
+	published_at         INTEGER NOT NULL,
+	observed_at          INTEGER NOT NULL,
+	views                INTEGER NOT NULL DEFAULT 0,
+	likes                INTEGER NOT NULL DEFAULT 0,
+	comments             INTEGER NOT NULL DEFAULT 0,
+	shares               INTEGER NOT NULL DEFAULT 0,
+	saves                INTEGER NOT NULL DEFAULT 0,
+	completion_rate      REAL NOT NULL DEFAULT 0,
+	comment_samples      INTEGER NOT NULL DEFAULT 0,
+	unanswered_questions INTEGER NOT NULL DEFAULT 0,
+	CHECK (views >= 0 AND likes >= 0 AND comments >= 0 AND shares >= 0 AND saves >= 0),
+	CHECK (completion_rate >= 0 AND completion_rate <= 1),
+	CHECK (unanswered_questions >= 0 AND unanswered_questions <= comment_samples)
+);
+CREATE INDEX IF NOT EXISTS idx_radar_obs_account ON radar_observations(account_id, published_at);
+CREATE INDEX IF NOT EXISTS idx_radar_obs_post ON radar_observations(post_id, observed_at);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.
