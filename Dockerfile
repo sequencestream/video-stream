@@ -1,4 +1,18 @@
-# Go main service: vsd (daemon) and vs (CLI) in one image.
+# Go main service: vsd (daemon, with the WebUI embedded) and vs (CLI) in one
+# image. Node appears only in the first stage; the runtime image has no
+# JavaScript runtime at all.
+FROM node:24-alpine AS webui
+
+WORKDIR /webui
+
+COPY webui/package.json webui/package-lock.json ./
+RUN npm ci
+
+COPY webui/next.config.mjs webui/postcss.config.mjs webui/tsconfig.json ./
+COPY webui/src ./src
+
+RUN npm run build
+
 FROM golang:1.26-alpine AS build
 
 WORKDIR /src
@@ -13,6 +27,10 @@ RUN go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
+
+# The export must be in place before the Go build, because //go:embed reads it
+# at compile time.
+COPY --from=webui /webui/out/ ./internal/webui/dist/
 
 ARG VERSION=0.1.0-dev
 # CGO_ENABLED=0 with the pure-Go SQLite driver yields a static binary that runs

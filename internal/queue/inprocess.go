@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/sequencestream/video-stream/internal/redact"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 )
@@ -254,8 +255,13 @@ func runHandler(ctx context.Context, h Handler, task store.Task) (result map[str
 func (q *InProcess) finish(ctx context.Context, logger *slog.Logger, task store.Task, status store.Status, result map[string]any, taskErr error) {
 	msg := ""
 	if taskErr != nil {
-		msg = taskErr.Error()
+		// A handler that talks to an upstream API can easily interpolate a
+		// credential into its error — a URL with a key in the query string is
+		// the classic case. The receipt is persisted and served over the API,
+		// so this is the last point at which that can be caught.
+		msg = redact.String(taskErr.Error())
 	}
+	result = redact.Map(result)
 
 	// The worker context is cancelled during shutdown, but the terminal state
 	// still has to reach the store or the task looks stuck forever.

@@ -3,6 +3,10 @@
 # There is no separate queue or database container: the MVP queue runs inside
 # the Go process and persists to SQLite on the shared volume. That is a direct
 # consequence of the in-process queue decision, not an omission.
+#
+# There is no WebUI container either. The interface is a static export embedded
+# in the vsd binary and served on the same port as the API, which also removes
+# the cross-origin configuration the two-service split needed.
 
 services:
   app:
@@ -38,22 +42,6 @@ services:
       VS_UPSTREAM_URL: "http://app:8080"
     volumes:
       - vs-data:/var/lib/video-stream
-    restart: unless-stopped
-
-  webui:
-    build:
-      context: ./webui
-      dockerfile: Dockerfile
-    container_name: video-stream-webui
-    ports:
-      - "3000:3000"
-    environment:
-      # Read by the browser, so it must be the host-visible address rather than
-      # the compose service name.
-      NEXT_PUBLIC_API_BASE_URL: "http://localhost:8080"
-    depends_on:
-      app:
-        condition: service_healthy
     restart: unless-stopped
 
 volumes:
