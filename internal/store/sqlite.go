@@ -183,6 +183,18 @@ CREATE TABLE IF NOT EXISTS script_polish_runs (
 	CHECK (tokens_used >= 0 AND cost_micros >= 0 AND rounds >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_script_polish_project ON script_polish_runs(project_id, created_at);
+
+-- compliance_passes records successful gate runs for fingerprint and reuse tracking.
+CREATE TABLE IF NOT EXISTS compliance_passes (
+	id                TEXT PRIMARY KEY,
+	account_id        TEXT NOT NULL,
+	structure_card_id TEXT NOT NULL,
+	project_id        TEXT NOT NULL DEFAULT '',
+	fingerprint       TEXT NOT NULL DEFAULT '[]',
+	created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_compliance_account ON compliance_passes(account_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_compliance_reuse ON compliance_passes(account_id, structure_card_id, created_at);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.
