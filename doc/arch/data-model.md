@@ -40,7 +40,9 @@ render_cache_key 相同   且   缓存产物的实际时长 ∈ 本次的 durati
 | `visual_prompt_slot` | 画面**槽位名**，不是提示词本身 | **否**，等画面意图 |
 | `subtitle_breaks` | 允许断行的位置（rune 下标） | 是（字幕断句） |
 | `depends_on` | 依赖的 seg id，构成 DAG | 是（拓扑序） |
-| `render_cache_key` | 派生。`rk1:<sha256>`，标识"产物能否复用" | **否**，渲染器尚不存在 |
+| `continuity_group` | 同一个连续动作的 seg 编组，组内不可独立重编译 | 是（`continuity_broken` 边界） |
+| `generation_batch` | 同一次多镜生成调用的 seg 编组 | 是（`batch_broken` 边界） |
+| `render_cache_key` | 派生。`rk2:<sha256>`，标识"产物能否复用" | 是（增量重编译查缓存） |
 | `protected` | 用户锁定，重生成不得覆盖 | **否**，重生成路径尚不存在 |
 | `audio_source` | V2 真人素材通路占位，MVP 恒为 nil | **否** |
 
@@ -69,12 +71,13 @@ render_cache_key 相同   且   缓存产物的实际时长 ∈ 本次的 durati
 | `audio_source` | ✓ | ✓（同上） |
 | `visual_prompt_slot` | ✗ | ✓ |
 | `subtitle_breaks` | ✗ | ✓ |
-| `render_profile`（voice / renderer） | ✗ | ✓ |
+| `render_profile`（voice / renderer / style_anchor） | ✗ | ✓ |
 | `seg_id` | ✗ | ✗ |
 | `duration_budget_ms` | ✗ | **✗** |
 | `depends_on` / `protected` | ✗ | ✗ |
+| `continuity_group` / `generation_batch` | ✗ | **✗** |
 
-两处排除值得单独解释。
+三处排除值得单独解释。
 
 **`seg_id` 不进 hash**：两段文字相同的 seg 必须命中同一份 TTS 产物。把 id 放进去，缓存就
 只能在"同一个 seg 的两次编辑之间"命中，命中率会低到没有意义。
@@ -84,15 +87,25 @@ render_cache_key 相同   且   缓存产物的实际时长 ∈ 本次的 durati
 预算不参与 key，而是命中之后作为第二道门——`Seg.CanReuse(cachedKey, cachedDurationMS)` 同时
 检查这两件事。
 
-`RenderProfile{Voice, Renderer}` 由调用方传入，代表"哪套管线产出的这份产物"。MVP 传零值，
-因为渲染器还不存在；接入真实渲染器时所有 key 会整体失效一次，而那时缓存里本来也没有可用的
-产物，代价为零。
+**`continuity_group` / `generation_batch` 不进任何 hash**：它们描述的是"哪些 seg 必须一起
+处理"，不是"这个 seg 长什么样"。放进 `render_cache_key` 会让重新分组打掉所有产物，而重新分组
+恰恰是增量重编译要用边界机制来处理的事。见
+[`doc/arch/incremental-recompile.md`](incremental-recompile.md)。
+
+`RenderProfile{Voice, Renderer, StyleAnchor}` 由调用方传入，代表"哪套管线产出的这份产物"。
+MVP 传零值，因为渲染器还不存在；接入真实渲染器时所有 key 会整体失效一次，而那时缓存里本来
+也没有可用的产物，代价为零。
+
+`style_anchor`（视觉基调）**必须**进 key，这是跨项目复用的正确性要求：
+`SegsByRenderCacheKey` 会把另一个项目里 key 相同的 seg 当作可复用来源，基调不在 key 里，
+两套视觉完全不同的项目就会互相复用对方的产物。
 
 ### 稳定性保证
 
 1. **确定性**。不经过 JSON、不遍历 map、不用反射，同输入在任何机器、任何 Go 版本上同输出。
-2. **版本自描述**。`ch1:` / `rk1:` 前缀随规则变化。规则改了，旧值可识别、可重算，
-   而不是静默地对不上。
+2. **版本自描述**。`ch1:` / `rk2:` 前缀随规则变化。规则改了，旧值可识别、可重算，
+   而不是静默地对不上。`render_cache_key` 已经用掉一次：`style_anchor` 进 key 时
+   `rk1:` 抬到了 `rk2:`，对应 schema v1→v2 的整份重 Seal。
 3. **抗拼接歧义**。逐字段 `len|name|len|value` 编码，因此
    `voice="arenderer"` 与 `voice="a", renderer="renderer"` 不会撞——裸拼接会。
 4. **文本任一字符变更必变**，包括前后空格、全角空格、emoji、零宽连接符。
@@ -147,7 +160,7 @@ MVP 由 TTS 对齐产出，`source` 恒为 `tts_align`；`asr` 与 `manual` 是�
 
 ## schema 版本与迁移
 
-文档里带 `schema_version`，当前 `1`。
+文档里带 `schema_version`，当前 `2`。
 
 迁移**在 `map[string]any` 上做，不在当前版本的结构体上做**。用结构体迁移是个经典陷阱：
 v2 删掉的字段在反序列化那一刻就没了，迁移函数根本看不到它要搬的数据。
@@ -159,9 +172,16 @@ v2 删掉的字段在反序列化那一刻就没了，迁移函数根本看不�
   它没有字段可以承载的数据。
 - 链条中间缺一步 → 报错点名缺哪一段，不静默停在半路。
 
-`DefaultMigrator` 当前**零个步骤**，因为 v1 是第一版。它仍然在干活：上面三条检查是这套机制
-真正的价值，而且它们在有第一条迁移之前就该生效。迁移链本身的逻辑由测试自建的多步 migrator
-覆盖，而不是在生产代码里硬塞一条虚构的历史迁移。
+`DefaultMigrator` 当前有**一个步骤**：v1→v2。v2 加了三个字段并把 `render_cache_key` 前缀
+抬到 `rk2:`，于是所有 v1 文档的派生字段都对不上重算结果——放着不管，这类文档读出来一切正常，
+然后在下一次保存时报 `ErrStaleDerived`，把 schema 升级造成的问题算在调用方头上。
+所以 `stepV1ToV2` 做的事只有一件：**整份重新 Seal**。
+
+这一步是通过 `Project` 结构体往返做的，正是上面警告过的那个陷阱。它在这里安全只因为一个具体
+理由——**v2 是 v1 的纯超集，没删任何字段**。以后任何删字段的迁移步骤都不能照抄这个写法。
+
+迁移链本身的逻辑（顺序、缺口、越界）由测试自建的多步 migrator 覆盖，而不是在生产代码里硬塞
+虚构的历史迁移。
 
 ## 持久化
 
@@ -169,6 +189,9 @@ v2 删掉的字段在反序列化那一刻就没了，迁移函数根本看不�
 projects(id, title, schema_version, document, created_at, updated_at)
 segs(project_id, seg_id, ordinal, content_hash, render_cache_key,
      duration_min_ms, duration_max_ms, protected)     ← 派生投影
+artifacts(render_cache_key, duration_ms, uri, cost_micros, created_at)
+recompile_runs(id, project_id, planned_at, total_segs, invalidated_segs,
+               full_rerun, boundary, cost_saved_micros)
 ```
 
 **为什么整份文档存一列 JSON，同时又投影出一张表**：整个增量重编译的故事最终落在一条查询上
@@ -183,8 +206,12 @@ segs(project_id, seg_id, ordinal, content_hash, render_cache_key,
 `SaveProject` 在写库前调 `Project.Validate()`。存储是边界，边界上校验：一份不自洽的文档一旦
 落盘，之后每个读者都得替它兜底。
 
-`SegsByRenderCacheKey` 在 MVP 没有消费者——渲染器还不存在。它与索引一起交付，
-否则渲染意图上来第一件事就是改 schema。这是本模块唯一一处"先建后用"。
+`artifacts` 以 `render_cache_key` 为主键而不是 seg id——两个 seg 共用一份产物正是把 `seg_id`
+排除出 key 的全部目的。`recompile_runs` 一次重编译一行，是失效率报告的全部证据来源。
+两张表的语义见 [`doc/arch/incremental-recompile.md`](incremental-recompile.md)。
+
+`SegsByRenderCacheKey` 交付时没有消费者，现在有了：增量重编译引擎靠它把另一个项目里 key 相同
+的 seg 认作可复用来源。当初连同索引一起先建后用，省掉了渲染路径上来第一件事就改 schema。
 
 ## 明确不做
 

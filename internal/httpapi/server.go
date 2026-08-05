@@ -14,6 +14,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/queue"
+	"github.com/sequencestream/video-stream/internal/recompile"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 )
@@ -25,6 +26,11 @@ type Deps struct {
 	Queue       queue.Queue
 	Sidecar     *sidecar.Client
 	Credentials *credential.Chain
+	// Recompile backs the invalidation rate report. Nil leaves the route
+	// registered and answering with an empty report, because "no runs
+	// recorded" is the honest answer and a missing route would look like a
+	// deployment fault.
+	Recompile *recompile.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -55,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tasks", s.handleCreateTask)
 	mux.HandleFunc("GET /v1/tasks", s.handleListTasks)
 	mux.HandleFunc("GET /v1/tasks/{id}", s.handleGetTask)
+	mux.HandleFunc("GET /v1/recompile/report", s.handleRecompileReport)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the
@@ -271,6 +278,69 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, http.StatusOK, task)
+}
+
+// recompileReportResponse is the invalidation rate view.
+//
+// The rates and the verdict are computed server-side and shipped alongside the
+// raw counters. They exist so that everyone reading this number reads it the
+// same way: a client dividing the counters itself would sooner or later average
+// per run instead of per seg, and quietly report a friendlier figure than the
+// one the scrap threshold is defined against.
+type recompileReportResponse struct {
+	Runs              int                        `json:"runs"`
+	TotalSegs         int                        `json:"total_segs"`
+	InvalidatedSegs   int                        `json:"invalidated_segs"`
+	ReusedSegs        int                        `json:"reused_segs"`
+	InvalidationRate  float64                    `json:"invalidation_rate"`
+	ReuseRate         float64                    `json:"reuse_rate"`
+	FullRerunRuns     int                        `json:"full_rerun_runs"`
+	FullRerunRate     float64                    `json:"full_rerun_rate"`
+	CostSavedMicros   int64                      `json:"cost_saved_micros"`
+	ByBoundary        map[recompile.Boundary]int `json:"by_boundary,omitempty"`
+	Verdict           recompile.Verdict          `json:"verdict"`
+	ScrapThresholdPct int                        `json:"scrap_threshold_percent"`
+	MinRunsForVerdict int                        `json:"min_runs_for_verdict"`
+}
+
+// handleRecompileReport answers with the invalidation rate to date.
+//
+// This is the only route the recompile engine gets. A report nobody can read
+// without writing Go is not a measurement of the project's largest technical
+// risk, which is what this engine was built to provide. Nothing here writes,
+// and no project entry point is added: the shape of /v1/projects belongs to
+// whichever intent actually edits projects over HTTP.
+func (s *Server) handleRecompileReport(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Recompile == nil {
+		writeJSON(w, r, http.StatusOK, recompileReportResponse{
+			Verdict:           recompile.VerdictInsufficientData,
+			ScrapThresholdPct: recompile.ScrapThresholdPercent,
+			MinRunsForVerdict: recompile.MinRunsForVerdict,
+		})
+		return
+	}
+
+	report, err := s.deps.Recompile.Report(r.Context(), r.URL.Query().Get("project"))
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "report_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, r, http.StatusOK, recompileReportResponse{
+		Runs:              report.Runs,
+		TotalSegs:         report.TotalSegs,
+		InvalidatedSegs:   report.InvalidatedSegs,
+		ReusedSegs:        report.ReusedSegs,
+		InvalidationRate:  report.InvalidationRate(),
+		ReuseRate:         report.ReuseRate(),
+		FullRerunRuns:     report.FullRerunRuns,
+		FullRerunRate:     report.FullRerunRate(),
+		CostSavedMicros:   report.CostSavedMicros,
+		ByBoundary:        report.ByBoundary,
+		Verdict:           report.Verdict(),
+		ScrapThresholdPct: recompile.ScrapThresholdPercent,
+		MinRunsForVerdict: recompile.MinRunsForVerdict,
+	})
 }
 
 type errorResponse struct {

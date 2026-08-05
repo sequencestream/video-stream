@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 )
 
 // SchemaVersion is the document shape this binary writes.
-const SchemaVersion = 1
+//
+// v2 added continuity_group and generation_batch to a seg and style_anchor to
+// the render profile, and folded the style anchor into the render cache key.
+const SchemaVersion = 2
 
 // schemaVersionField is the one key every stored document must carry.
 const schemaVersionField = "schema_version"
@@ -54,11 +58,45 @@ func NewMigrator(target int, steps ...Step) *Migrator {
 }
 
 // DefaultMigrator is the migrator applied to stored projects.
+var DefaultMigrator = NewMigrator(SchemaVersion, stepV1ToV2)
+
+// stepV1ToV2 reseals every derived field.
 //
-// It holds no steps, because v1 is the first version. It still does real work:
-// it rejects documents with a missing or future version, which is the failure
-// this mechanism exists to prevent long before there is anything to upgrade.
-var DefaultMigrator = NewMigrator(SchemaVersion)
+// v2 added style_anchor to the render cache key and moved its prefix to rk2:,
+// so every v1 render_cache_key now disagrees with a recomputation. Left alone,
+// such a document reads back fine and then fails Validate on the next save with
+// ErrStaleDerived — an error blaming the caller for something the schema bump
+// did.
+//
+// The step round-trips through the Project struct, which Step's doc comment
+// warns against in general: a field the target version dropped disappears
+// during unmarshalling, so the step never sees the data it was meant to move.
+// That is safe here for one specific reason — v2 is a pure superset of v1 and
+// removes nothing. A future step that drops a field must not copy this.
+var stepV1ToV2 = Step{From: 1, To: 2, Apply: func(doc map[string]any) error {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("re-encode document: %w", err)
+	}
+	var p Project
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("decode document as a project: %w", err)
+	}
+	p.Seal()
+
+	resealed, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("encode resealed project: %w", err)
+	}
+	var next map[string]any
+	if err := json.Unmarshal(resealed, &next); err != nil {
+		return fmt.Errorf("decode resealed project: %w", err)
+	}
+
+	clear(doc)
+	maps.Copy(doc, next)
+	return nil
+}}
 
 // Migrate upgrades raw to the migrator's target version and returns the
 // rewritten document. A document already at the target is returned unchanged.
