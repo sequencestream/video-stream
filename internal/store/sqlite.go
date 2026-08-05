@@ -195,6 +195,14 @@ CREATE TABLE IF NOT EXISTS compliance_passes (
 );
 CREATE INDEX IF NOT EXISTS idx_compliance_account ON compliance_passes(account_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_compliance_reuse ON compliance_passes(account_id, structure_card_id, created_at);
+
+CREATE TABLE IF NOT EXISTS style_packs (
+	id             TEXT PRIMARY KEY,
+	name           TEXT NOT NULL,
+	schema_version INTEGER NOT NULL,
+	document       TEXT NOT NULL,
+	created_at     INTEGER NOT NULL
+);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.
