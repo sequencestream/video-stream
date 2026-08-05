@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sequencestream/video-stream/internal/config"
+	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -19,10 +20,14 @@ import (
 
 // Deps are the collaborators the HTTP handlers need.
 type Deps struct {
-	Config  config.Config
-	Store   store.TaskStore
-	Queue   queue.Queue
-	Sidecar *sidecar.Client
+	Config      config.Config
+	Store       store.TaskStore
+	Queue       queue.Queue
+	Sidecar     *sidecar.Client
+	Credentials *credential.Chain
+	// WebUI serves the embedded interface at "/". Nil leaves the root
+	// unrouted, which is what the API tests want.
+	WebUI   http.Handler
 	Logger  *slog.Logger
 	Version string
 }
@@ -50,6 +55,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tasks", s.handleCreateTask)
 	mux.HandleFunc("GET /v1/tasks", s.handleListTasks)
 	mux.HandleFunc("GET /v1/tasks/{id}", s.handleGetTask)
+
+	// The embedded UI takes the bare "/" pattern, which in net/http is the
+	// catch-all. It is registered last so every API route above wins, and the
+	// UI only sees what is left over.
+	if s.deps.WebUI != nil {
+		mux.Handle("/", s.deps.WebUI)
+	}
 
 	return s.withLogging(mux)
 }
@@ -156,25 +168,33 @@ type metaResponse struct {
 	Providers []providerStatus `json:"providers"`
 }
 
-// providerStatus never carries the key itself, only whether it resolved.
+// providerStatus never carries the key itself, only whether one resolved and
+// which backend supplied it. The source is what makes "I set my key but it is
+// not being used" diagnosable: it distinguishes a stale environment variable
+// shadowing the keychain from no credential at all.
 type providerStatus struct {
-	Name          string `json:"name"`
-	Model         string `json:"model,omitempty"`
-	BaseURL       string `json:"base_url,omitempty"`
-	APIKeyEnv     string `json:"api_key_env,omitempty"`
-	HasCredential bool   `json:"has_credential"`
+	Name           string `json:"name"`
+	Model          string `json:"model,omitempty"`
+	BaseURL        string `json:"base_url,omitempty"`
+	Protocol       string `json:"protocol"`
+	HasCredential  bool   `json:"has_credential"`
+	CredentialFrom string `json:"credential_from,omitempty"`
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	providers := make([]providerStatus, 0, len(s.deps.Config.Providers))
 	for _, p := range s.deps.Config.Providers {
-		providers = append(providers, providerStatus{
-			Name:          p.Name,
-			Model:         p.Model,
-			BaseURL:       p.BaseURL,
-			APIKeyEnv:     p.APIKeyEnv,
-			HasCredential: p.HasCredential(),
-		})
+		status := providerStatus{
+			Name:     p.Name,
+			Model:    p.Model,
+			BaseURL:  p.BaseURL,
+			Protocol: p.WireProtocol(),
+		}
+		if s.deps.Credentials != nil {
+			status.CredentialFrom, status.HasCredential =
+				s.deps.Credentials.Source(r.Context(), credential.ProviderKey(p.Name))
+		}
+		providers = append(providers, status)
 	}
 
 	writeJSON(w, r, http.StatusOK, metaResponse{

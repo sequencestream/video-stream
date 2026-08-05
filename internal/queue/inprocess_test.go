@@ -2,12 +2,16 @@ package queue_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sequencestream/video-stream/internal/queue"
+	"github.com/sequencestream/video-stream/internal/redact"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 )
@@ -163,6 +167,48 @@ func TestHandlerPanicDoesNotKillTheWorkerPool(t *testing.T) {
 	}
 	if got := waitForTerminal(t, taskStore, fine.ID); got.Status != store.StatusSucceeded {
 		t.Fatalf("follow-up task status = %s, want succeeded", got.Status)
+	}
+}
+
+// TestReceiptsAreRedactedBeforePersistence covers the last hop where a
+// credential could escape. Receipts are returned by the API, rendered by the
+// WebUI and kept in SQLite indefinitely, so a handler that carelessly echoes a
+// key into its result or its error must not be able to persist it.
+func TestReceiptsAreRedactedBeforePersistence(t *testing.T) {
+	const secret = "sk-queue-test-1234567890-abcdefgh"
+	redact.Register(secret)
+
+	registry := queue.NewRegistry()
+	registry.Register("leaky-result", func(context.Context, store.Task) (map[string]any, error) {
+		return map[string]any{
+			"note":   "called with " + secret,
+			"nested": map[string]any{"api_key": secret},
+		}, nil
+	})
+	registry.Register("leaky-error", func(context.Context, store.Task) (map[string]any, error) {
+		return nil, fmt.Errorf("upstream rejected %s", secret)
+	})
+
+	q, taskStore, _ := newTestQueue(t, registry)
+
+	for _, taskType := range []string{"leaky-result", "leaky-error"} {
+		submitted, err := q.Submit(context.Background(), queue.Submission{Type: taskType, Title: taskType})
+		if err != nil {
+			t.Fatalf("submit %s: %v", taskType, err)
+		}
+
+		done := waitForTerminal(t, taskStore, submitted.ID)
+
+		encoded, err := json.Marshal(done)
+		if err != nil {
+			t.Fatalf("marshal receipt: %v", err)
+		}
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("%s persisted the credential in its receipt: %s", taskType, encoded)
+		}
+		if !strings.Contains(string(encoded), redact.Placeholder) {
+			t.Errorf("%s receipt should carry the redaction placeholder, got %s", taskType, encoded)
+		}
 	}
 }
 

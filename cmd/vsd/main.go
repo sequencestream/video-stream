@@ -15,13 +15,16 @@ import (
 	"time"
 
 	"github.com/sequencestream/video-stream/internal/config"
+	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/httpapi"
 	"github.com/sequencestream/video-stream/internal/logging"
+	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/tasks"
 	"github.com/sequencestream/video-stream/internal/telemetry"
+	"github.com/sequencestream/video-stream/internal/webui"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -69,8 +72,30 @@ func run() error {
 
 	sidecarClient := sidecar.New(cfg.Sidecar.BaseURL, cfg.Sidecar.Timeout)
 
+	credentials, err := credential.Open(credential.Options{
+		Backend:   cfg.Credentials.Backend,
+		VaultPath: cfg.VaultPath(),
+		// The daemon has no terminal to prompt on, so an encrypted vault can
+		// only be unlocked through the environment here. A locked vault is not
+		// fatal: the affected providers simply report no credential, which is
+		// better than refusing to start the whole service over one optional key.
+		VaultPassphrase: os.Getenv("VS_VAULT_PASSPHRASE"),
+	})
+	if err != nil {
+		return err
+	}
+	logger.Info("credential store ready", slog.String("backend", credentials.Name()))
+
+	providers := provider.New(provider.Options{
+		Providers:   cfg.Providers,
+		Credentials: credentials,
+	})
+
 	registry := queue.NewRegistry()
-	tasks.Register(registry, sidecarClient)
+	tasks.Register(registry, tasks.Deps{
+		Sidecar:   sidecarClient,
+		Providers: providers,
+	})
 
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
@@ -88,13 +113,17 @@ func run() error {
 		return err
 	}
 
+	logger.Info("webui", slog.Bool("embedded", webui.Built()))
+
 	api := httpapi.NewServer(httpapi.Deps{
-		Config:  cfg,
-		Store:   taskStore,
-		Queue:   q,
-		Sidecar: sidecarClient,
-		Logger:  logger,
-		Version: version,
+		Config:      cfg,
+		Store:       taskStore,
+		Queue:       q,
+		Sidecar:     sidecarClient,
+		Credentials: credentials,
+		WebUI:       webui.Handler(),
+		Logger:      logger,
+		Version:     version,
 	})
 
 	srv := &http.Server{

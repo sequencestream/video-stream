@@ -41,6 +41,8 @@ func run(ctx context.Context, args []string) error {
 		return cmdRender(ctx, args[1:])
 	case "status":
 		return cmdStatus(ctx, args[1:])
+	case "credential", "cred":
+		return cmdCredential(ctx, args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -60,6 +62,7 @@ Usage:
   vs create [flags]        submit a task (defaults to the echo fake task)
   vs render <project> ...  submit a render task
   vs status <task-id>      show a task
+  vs credential <cmd>      manage provider API keys (see vs credential help)
   vs version               print the CLI version
 
 Common flags:

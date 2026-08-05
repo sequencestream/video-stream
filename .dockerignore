@@ -4,10 +4,17 @@ bin/
 data/
 output/
 doc/
-webui/
 sidecar/
 *.md
 config.yaml
 config.local.yaml
 .env
 .env.local
+
+# webui/ is part of the build context now: the first Dockerfile stage compiles
+# the static export that gets embedded into vsd. Only its generated output is
+# excluded, so the image never reuses a stale local build.
+webui/node_modules/
+webui/.next/
+webui/out/
+internal/webui/dist/

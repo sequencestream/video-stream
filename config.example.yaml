@@ -3,9 +3,10 @@
 # Copy to config.yaml and adjust. Every field can also be set through a VS_-
 # prefixed environment variable, which takes precedence over this file.
 #
-# API keys are deliberately absent: a provider names the environment variable
-# holding its key via api_key_env, and the key is only ever read from the
-# environment. That keeps credentials out of the repository.
+# There is no field anywhere in this file for an API key, and that is not an
+# omission. Keys live in your OS keychain or an encrypted vault on your own
+# machine; store one with `vs credential set <provider>`. See
+# doc/arch/credentials.md.
 
 server:
   addr: ":8080" # VS_SERVER_ADDR
@@ -34,12 +35,26 @@ queue:
   workers: 2 # VS_QUEUE_WORKERS
   buffer: 64 # VS_QUEUE_BUFFER
 
+credentials:
+  # VS_CREDENTIALS_BACKEND — where secrets are read from and written to:
+  #   auto     environment, then OS keychain, then encrypted vault (default)
+  #   keychain environment, then OS keychain; fails at startup without one
+  #   vault    environment, then the encrypted vault file
+  #   env      environment variables only
+  backend: "auto"
+  # VS_CREDENTIALS_VAULT_PATH — defaults to <data_dir>/credentials.vault.
+  # Unlock it with VS_VAULT_PASSPHRASE, or let `vs` prompt on a terminal.
+  vault_path: ""
+
+# Providers carry metadata only. Each one's key is looked up under
+# "provider/<name>" in the credential store.
 providers:
   - name: "openai"
     base_url: "https://api.openai.com/v1"
     model: "gpt-4o-mini"
-    api_key_env: "OPENAI_API_KEY"
-  - name: "anthropic"
-    base_url: "https://api.anthropic.com"
-    model: "claude-sonnet-4-5"
-    api_key_env: "ANTHROPIC_API_KEY"
+    protocol: "openai"
+  # Any OpenAI-compatible endpoint works by pointing base_url at it.
+  - name: "dashscope"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model: "qwen-plus"
+    protocol: "openai"

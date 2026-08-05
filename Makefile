@@ -2,7 +2,7 @@ SHELL := /bin/bash
 VERSION ?= 0.1.0-dev
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help build test vet fmt check run sidecar webui up down logs clean
+.PHONY: help build test vet fmt check secrets run sidecar webui webui-build up down logs clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -21,7 +21,10 @@ vet: ## Run go vet
 fmt: ## Format the Go sources
 	gofmt -w cmd internal
 
-check: vet test ## Vet and test
+secrets: ## Fail if a plaintext credential was committed
+	./scripts/check-secrets.sh
+
+check: vet test secrets ## Vet, test and scan for committed credentials
 
 run: build ## Run the main service in the foreground
 	./bin/vsd
@@ -33,6 +36,14 @@ sidecar: ## Run the Python sidecar in the foreground
 
 webui: ## Run the WebUI dev server
 	cd webui && npm install && npm run dev
+
+webui-build: ## Build the WebUI static export into internal/webui/dist
+	cd webui && npm ci && npm run build
+	rm -rf internal/webui/dist
+	mkdir -p internal/webui/dist
+	cp -R webui/out/. internal/webui/dist/
+	touch internal/webui/dist/.gitkeep
+	@echo "embedded WebUI refreshed; run 'make build' to bake it into the binary"
 
 up: ## Start the full stack with Docker Compose
 	docker compose up --build -d

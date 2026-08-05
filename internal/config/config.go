@@ -1,9 +1,13 @@
 // Package config loads the unified configuration shared by the daemon and CLI.
 //
 // Precedence is: built-in defaults < YAML file < VS_-prefixed environment
-// variables. Model provider API keys are deliberately never read from the YAML
-// file; they are resolved from the environment variable named by the provider's
-// api_key_env field so that credentials cannot be committed to the repository.
+// variables.
+//
+// Nothing in this package holds a secret. Provider entries carry only metadata,
+// and the key itself is fetched from internal/credential at the moment of use.
+// That is deliberate: a Config is passed around widely and serialised by the
+// meta endpoint, so a plaintext field here would be one careless log line away
+// from leaking. See doc/arch/credentials.md.
 package config
 
 import (
@@ -19,14 +23,15 @@ import (
 
 // Config is the full runtime configuration.
 type Config struct {
-	Server    Server     `yaml:"server"`
-	Sidecar   Sidecar    `yaml:"sidecar"`
-	Storage   Storage    `yaml:"storage"`
-	Budget    Budget     `yaml:"budget"`
-	Logging   Logging    `yaml:"logging"`
-	Telemetry Telemetry  `yaml:"telemetry"`
-	Queue     Queue      `yaml:"queue"`
-	Providers []Provider `yaml:"providers"`
+	Server      Server      `yaml:"server"`
+	Sidecar     Sidecar     `yaml:"sidecar"`
+	Storage     Storage     `yaml:"storage"`
+	Budget      Budget      `yaml:"budget"`
+	Logging     Logging     `yaml:"logging"`
+	Telemetry   Telemetry   `yaml:"telemetry"`
+	Queue       Queue       `yaml:"queue"`
+	Credentials Credentials `yaml:"credentials"`
+	Providers   []Provider  `yaml:"providers"`
 }
 
 // Server holds the HTTP listener settings of the main service.
@@ -79,31 +84,62 @@ type Queue struct {
 	Buffer int `yaml:"buffer"`
 }
 
-// Provider describes one model provider. APIKey is never populated from YAML.
-type Provider struct {
-	Name      string `yaml:"name"`
-	BaseURL   string `yaml:"base_url"`
-	Model     string `yaml:"model"`
-	APIKeyEnv string `yaml:"api_key_env"`
+// Protocol identifiers for Provider.Protocol.
+const (
+	// ProtocolOpenAI is the OpenAI Chat Completions wire format, which most
+	// vendors expose a compatible endpoint for.
+	ProtocolOpenAI = "openai"
+)
 
-	// APIKey is resolved from the environment at load time and is not
-	// serialised back out.
-	APIKey string `yaml:"-"`
+// Credentials selects where secrets are stored. It holds no secret itself.
+type Credentials struct {
+	// Backend is auto, keychain, vault or env. See internal/credential.
+	Backend string `yaml:"backend"`
+	// VaultPath overrides the encrypted vault location. Empty means a file
+	// named credentials.vault inside Storage.DataDir.
+	VaultPath string `yaml:"vault_path"`
 }
 
-// HasCredential reports whether the provider's API key was found in the
-// environment.
-func (p Provider) HasCredential() bool { return p.APIKey != "" }
+// Provider describes one model provider.
+//
+// It carries no API key, by design. The key is read from the credential store
+// under credential.ProviderKey(Name) at the moment a request is built.
+type Provider struct {
+	Name    string `yaml:"name"`
+	BaseURL string `yaml:"base_url"`
+	Model   string `yaml:"model"`
+	// Protocol is the wire format to speak. Empty means ProtocolOpenAI.
+	Protocol string `yaml:"protocol"`
+}
+
+// WireProtocol returns the protocol to use, applying the default.
+func (p Provider) WireProtocol() string {
+	if strings.TrimSpace(p.Protocol) == "" {
+		return ProtocolOpenAI
+	}
+	return strings.ToLower(strings.TrimSpace(p.Protocol))
+}
+
+// Provider returns the named provider.
+func (c Config) Provider(name string) (Provider, bool) {
+	for _, p := range c.Providers {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Provider{}, false
+}
 
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Server:  Server{Addr: ":8080"},
-		Sidecar: Sidecar{BaseURL: "http://127.0.0.1:8090", Timeout: 5 * time.Second},
-		Storage: Storage{DataDir: "./data", OutputDir: "./output"},
-		Budget:  Budget{MaxCostPerVideoUSD: 2.0, DailyCapUSD: 20.0},
-		Logging: Logging{Level: "info", Format: "json"},
-		Queue:   Queue{Workers: 2, Buffer: 64},
+		Server:      Server{Addr: ":8080"},
+		Sidecar:     Sidecar{BaseURL: "http://127.0.0.1:8090", Timeout: 5 * time.Second},
+		Storage:     Storage{DataDir: "./data", OutputDir: "./output"},
+		Budget:      Budget{MaxCostPerVideoUSD: 2.0, DailyCapUSD: 20.0},
+		Logging:     Logging{Level: "info", Format: "json"},
+		Queue:       Queue{Workers: 2, Buffer: 64},
+		Credentials: Credentials{Backend: "auto"},
 	}
 }
 
@@ -128,7 +164,6 @@ func Load(path string) (Config, error) {
 	}
 
 	applyEnv(&cfg)
-	resolveCredentials(&cfg)
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -150,14 +185,8 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.Telemetry.Endpoint, "VS_TELEMETRY_ENDPOINT")
 	setInt(&cfg.Queue.Workers, "VS_QUEUE_WORKERS")
 	setInt(&cfg.Queue.Buffer, "VS_QUEUE_BUFFER")
-}
-
-func resolveCredentials(cfg *Config) {
-	for i := range cfg.Providers {
-		if env := cfg.Providers[i].APIKeyEnv; env != "" {
-			cfg.Providers[i].APIKey = os.Getenv(env)
-		}
-	}
+	setString(&cfg.Credentials.Backend, "VS_CREDENTIALS_BACKEND")
+	setString(&cfg.Credentials.VaultPath, "VS_CREDENTIALS_VAULT_PATH")
 }
 
 // Validate rejects configurations that would fail later in confusing ways.
@@ -189,6 +218,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate provider name %q", p.Name)
 		}
 		seen[p.Name] = true
+
+		if p.WireProtocol() != ProtocolOpenAI {
+			return fmt.Errorf("provider %q uses unsupported protocol %q: only %q is implemented",
+				p.Name, p.Protocol, ProtocolOpenAI)
+		}
 	}
 	return nil
 }
@@ -196,6 +230,16 @@ func (c Config) Validate() error {
 // DatabasePath is the SQLite file backing task persistence.
 func (c Config) DatabasePath() string {
 	return filepath.Join(c.Storage.DataDir, "video-stream.db")
+}
+
+// VaultPath is where the encrypted credential vault lives. It defaults to a
+// file beside the task database so a user backing up the data directory takes
+// their credentials with them.
+func (c Config) VaultPath() string {
+	if path := strings.TrimSpace(c.Credentials.VaultPath); path != "" {
+		return path
+	}
+	return filepath.Join(c.Storage.DataDir, "credentials.vault")
 }
 
 func setString(dst *string, key string) {
