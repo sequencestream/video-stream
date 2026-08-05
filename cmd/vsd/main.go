@@ -20,6 +20,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/logging"
 	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
+	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -109,6 +110,14 @@ func run() error {
 		Logger:   logger,
 	})
 
+	radarPoller := radar.NewPoller(cfg.Radar.PerMinute, cfg.Radar.Burst, logger)
+	radarEngine := radar.New(radar.Options{
+		Store:    taskStore,
+		Poller:   radarPoller,
+		Reporter: reporter,
+		Logger:   logger,
+	})
+
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -125,6 +134,10 @@ func run() error {
 		return err
 	}
 
+	if cfg.Radar.Interval > 0 {
+		go runRadarPolling(ctx, logger, radarEngine, cfg.Radar.Interval)
+	}
+
 	logger.Info("webui", slog.Bool("embedded", webui.Built()))
 
 	api := httpapi.NewServer(httpapi.Deps{
@@ -134,6 +147,7 @@ func run() error {
 		Sidecar:     sidecarClient,
 		Credentials: credentials,
 		Recompile:   recompiler,
+		Radar:       radarEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,
@@ -189,4 +203,28 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func runRadarPolling(ctx context.Context, logger *slog.Logger, engine *radar.Engine, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			result, err := engine.PollOnce(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("radar poll failed", slog.String("error", err.Error()))
+				continue
+			}
+			logger.Info("radar poll finished",
+				slog.Int("polled", result.Polled),
+				slog.Int("readings", len(result.Readings)),
+				slog.Int("no_source", result.NoSource),
+				slog.Int("rate_limited", result.RateLimited),
+				slog.Int("failed", result.Failed))
+		}
+	}
 }

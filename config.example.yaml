@@ -35,6 +35,11 @@ queue:
   workers: 2 # VS_QUEUE_WORKERS
   buffer: 64 # VS_QUEUE_BUFFER
 
+radar:
+  interval: 6h # VS_RADAR_INTERVAL — zero disables background polling
+  per_minute: 6 # VS_RADAR_PER_MINUTE — requests per platform per minute; zero means unlimited
+  burst: 1 # VS_RADAR_BURST — back-to-back grants after idle
+
 credentials:
   # VS_CREDENTIALS_BACKEND — where secrets are read from and written to:
   #   auto     environment, then OS keychain, then encrypted vault (default)
