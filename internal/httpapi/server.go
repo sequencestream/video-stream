@@ -17,6 +17,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
+	"github.com/sequencestream/video-stream/internal/scriptagents"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 )
@@ -40,6 +41,8 @@ type Deps struct {
 	// Ideation backs structure card extraction and cross-category topic migration.
 	// Nil leaves routes registered with empty collections for the same reason.
 	Ideation *ideation.Engine
+	// ScriptAgents backs the multi-agent script polish loop.
+	ScriptAgents *scriptagents.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -82,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/ideation/migrate", s.handleIdeationMigrate)
 	mux.HandleFunc("GET /v1/ideation/topics", s.handleIdeationTopics)
 	mux.HandleFunc("POST /v1/ideation/recall", s.handleIdeationRecall)
+	mux.HandleFunc("POST /v1/script/polish", s.handleScriptPolish)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the

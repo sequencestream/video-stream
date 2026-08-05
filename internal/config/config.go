@@ -33,6 +33,7 @@ type Config struct {
 	Credentials Credentials `yaml:"credentials"`
 	Providers   []Provider  `yaml:"providers"`
 	Radar       Radar       `yaml:"radar"`
+	ScriptAgents ScriptAgents `yaml:"script_agents"`
 }
 
 // Radar controls the competitor radar polling schedule and rate limits.
@@ -45,6 +46,15 @@ type Radar struct {
 	PerMinute float64 `yaml:"per_minute"`
 	// Burst is how many requests may be sent back-to-back after an idle period.
 	Burst int `yaml:"burst"`
+}
+
+// ScriptAgents controls the multi-agent script polish loop termination thresholds.
+type ScriptAgents struct {
+	MaxRounds            int     `yaml:"max_rounds"`
+	MetricImprovementMin float64 `yaml:"metric_improvement_min"`
+	MaxNewIssues         int     `yaml:"max_new_issues"`
+	StagnantRounds       int     `yaml:"stagnant_rounds"`
+	CostPer1KTokensMicros int64  `yaml:"cost_per_1k_tokens_micros"`
 }
 
 // Server holds the HTTP listener settings of the main service.
@@ -158,6 +168,13 @@ func Default() Config {
 			PerMinute: 6,
 			Burst:     1,
 		},
+		ScriptAgents: ScriptAgents{
+			MaxRounds:            3,
+			MetricImprovementMin: 0.03,
+			MaxNewIssues:         1,
+			StagnantRounds:       2,
+			CostPer1KTokensMicros: 500,
+		},
 	}
 }
 
@@ -208,6 +225,11 @@ func applyEnv(cfg *Config) {
 	setDuration(&cfg.Radar.Interval, "VS_RADAR_INTERVAL")
 	setFloat(&cfg.Radar.PerMinute, "VS_RADAR_PER_MINUTE")
 	setInt(&cfg.Radar.Burst, "VS_RADAR_BURST")
+	setInt(&cfg.ScriptAgents.MaxRounds, "VS_SCRIPT_MAX_ROUNDS")
+	setFloat(&cfg.ScriptAgents.MetricImprovementMin, "VS_SCRIPT_METRIC_IMPROVEMENT_MIN")
+	setInt(&cfg.ScriptAgents.MaxNewIssues, "VS_SCRIPT_MAX_NEW_ISSUES")
+	setInt(&cfg.ScriptAgents.StagnantRounds, "VS_SCRIPT_STAGNANT_ROUNDS")
+	setInt64(&cfg.ScriptAgents.CostPer1KTokensMicros, "VS_SCRIPT_COST_PER_1K_TOKENS_MICROS")
 }
 
 // Validate rejects configurations that would fail later in confusing ways.
@@ -238,6 +260,15 @@ func (c Config) Validate() error {
 	}
 	if c.Radar.Burst < 0 {
 		return fmt.Errorf("radar.burst must not be negative, got %d", c.Radar.Burst)
+	}
+	if c.ScriptAgents.MaxRounds < 1 {
+		return fmt.Errorf("script_agents.max_rounds must be at least 1, got %d", c.ScriptAgents.MaxRounds)
+	}
+	if c.ScriptAgents.MetricImprovementMin < 0 {
+		return fmt.Errorf("script_agents.metric_improvement_min must not be negative")
+	}
+	if c.ScriptAgents.StagnantRounds < 1 {
+		return fmt.Errorf("script_agents.stagnant_rounds must be at least 1")
 	}
 	seen := make(map[string]bool, len(c.Providers))
 	for _, p := range c.Providers {
@@ -281,6 +312,14 @@ func setString(dst *string, key string) {
 func setInt(dst *int, key string) {
 	if v, ok := os.LookupEnv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
+			*dst = n
+		}
+	}
+}
+
+func setInt64(dst *int64, key string) {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			*dst = n
 		}
 	}

@@ -170,6 +170,19 @@ CREATE TABLE IF NOT EXISTS topic_cards (
 	created_at        INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_topic_cards_structure ON topic_cards(structure_card_id, created_at);
+
+-- script_polish_runs records token spend and termination for each polish loop.
+CREATE TABLE IF NOT EXISTS script_polish_runs (
+	id          TEXT PRIMARY KEY,
+	project_id  TEXT NOT NULL DEFAULT '',
+	stop_reason TEXT NOT NULL DEFAULT '',
+	tokens_used INTEGER NOT NULL DEFAULT 0,
+	cost_micros INTEGER NOT NULL DEFAULT 0,
+	rounds      INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL,
+	CHECK (tokens_used >= 0 AND cost_micros >= 0 AND rounds >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_script_polish_project ON script_polish_runs(project_id, created_at);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.

@@ -109,6 +109,18 @@ curl -s -X POST localhost:8080/v1/ideation/migrate \
 
 六维断言、图查询与向量召回回归，见 [`doc/arch/ideation.md`](doc/arch/ideation.md)。
 
+## 多 Agent 脚本打磨
+
+`internal/scriptagents` 运行 Writer×3、Audience-Simulator、Judge + 确定性 Skill 闭环；Critic 只诊不治，定稿为合法 seg 结构。
+
+```bash
+curl -s -X POST localhost:8080/v1/script/polish \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"home fitness","spike":"nobody talks about this","project_id":"demo-1"}'
+```
+
+终止阈值与验收对照见 [`doc/arch/script-agents.md`](doc/arch/script-agents.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -228,6 +240,7 @@ vs credential status                           # 每个 provider 的密钥来自
 | POST | `/v1/ideation/migrate` | 跨类目迁移，产出 3–5 选题卡 |
 | GET | `/v1/ideation/topics` | 选题卡列表；`?card_id=` 可筛选 |
 | POST | `/v1/ideation/recall` | 向量召回 top-k 结构卡 |
+| POST | `/v1/script/polish` | 多 Agent 脚本打磨 → 合法 seg 工程 |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -282,6 +295,7 @@ internal/model       核心数据模型：seg 图、词级时间戳、派生 has
 internal/recompile   增量重编译：失效传播、六条边界、失效率报告
 internal/radar       竞品雷达：残差热点、四项衍生测度、限速轮询
 internal/ideation    结构卡片提取、图存储、向量召回、跨类目选题
+internal/scriptagents 多 Agent 脚本打磨闭环
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler
