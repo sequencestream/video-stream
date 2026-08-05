@@ -21,6 +21,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/scriptagents"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
+	"github.com/sequencestream/video-stream/internal/visual"
 )
 
 // Deps are the collaborators the HTTP handlers need.
@@ -46,6 +47,8 @@ type Deps struct {
 	ScriptAgents *scriptagents.Engine
 	// Compliance backs the three inauthentic-differentiation gates before render.
 	Compliance *compliance.Engine
+	// Visual backs L2 style packs and the visual identity stack.
+	Visual *visual.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
 	// unrouted, which is what the API tests want.
 	WebUI   http.Handler
@@ -90,6 +93,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/ideation/recall", s.handleIdeationRecall)
 	mux.HandleFunc("POST /v1/script/polish", s.handleScriptPolish)
 	mux.HandleFunc("POST /v1/compliance/check", s.handleComplianceCheck)
+	mux.HandleFunc("GET /v1/visual/packs", s.handleVisualPacks)
+	mux.HandleFunc("POST /v1/visual/packs", s.handleVisualPacks)
+	mux.HandleFunc("GET /v1/visual/packs/{id}", s.handleVisualPackByID)
+	mux.HandleFunc("GET /v1/visual/packs/{id}/export", s.handleVisualPackExport)
+	mux.HandleFunc("POST /v1/visual/packs/import", s.handleVisualPackImport)
+	mux.HandleFunc("POST /v1/visual/packs/{id}/apply", s.handleVisualPackApply)
 
 	// The embedded UI takes the bare "/" pattern, which in net/http is the
 	// catch-all. It is registered last so every API route above wins, and the

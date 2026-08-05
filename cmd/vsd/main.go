@@ -29,6 +29,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/tasks"
 	"github.com/sequencestream/video-stream/internal/telemetry"
+	"github.com/sequencestream/video-stream/internal/visual"
 	"github.com/sequencestream/video-stream/internal/webui"
 )
 
@@ -155,6 +156,8 @@ func run() error {
 		return err
 	}
 
+	visualEngine := visual.New(visual.Options{Store: taskStore, Reporter: reporter, Logger: logger})
+
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -188,6 +191,7 @@ func run() error {
 		Ideation:    ideationEngine,
 		ScriptAgents: scriptEngine,
 		Compliance:   complianceEngine,
+		Visual:       visualEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,

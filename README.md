@@ -133,6 +133,18 @@ curl -s -X POST localhost:8080/v1/compliance/check \
 
 规则与申诉方式见 [`doc/arch/compliance.md`](doc/arch/compliance.md)。
 
+## 视觉身份栈与 L2 样式包
+
+`internal/visual` 把 style_ref、色板、光照、构图、品牌与场景卡编译为 `style_seed`；L2 样式包可 import/export，换包更新 `style_anchor` 并触发全量重跑。
+
+```bash
+curl -s -X POST localhost:8080/v1/visual/packs/{id}/apply \
+  -H 'Content-Type: application/json' \
+  -d '{"project":{...}}'   # 响应含 full_rerun_warning
+```
+
+跨厂商光线不保证像素一致，见 [`doc/arch/visual.md`](doc/arch/visual.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -254,6 +266,10 @@ vs credential status                           # 每个 provider 的密钥来自
 | POST | `/v1/ideation/recall` | 向量召回 top-k 结构卡 |
 | POST | `/v1/script/polish` | 多 Agent 脚本打磨 → 合法 seg 工程 |
 | POST | `/v1/compliance/check` | 渲染前三道闸校验（无 bypass） |
+| GET/POST | `/v1/visual/packs` | L2 样式包列表 / 创建 |
+| POST | `/v1/visual/packs/import` | 导入样式包 JSON |
+| GET | `/v1/visual/packs/{id}/export` | 导出样式包 |
+| POST | `/v1/visual/packs/{id}/apply` | 应用到工程（含整段重跑提示） |
 | GET | `/` 及其他 | 内嵌的 WebUI 静态资源；未构建 WebUI 时返回 503 与构建指引 |
 
 sidecar（默认 `:8090`）：
@@ -310,6 +326,7 @@ internal/radar       竞品雷达：残差热点、四项衍生测度、限速�
 internal/ideation    结构卡片提取、图存储、向量召回、跨类目选题
 internal/scriptagents 多 Agent 脚本打磨闭环
 internal/compliance   inauthentic 三道闸（渲染前必经）
+internal/visual       L2 视觉样式包与身份栈
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
 internal/queue       进程内队列，接口预留 Temporal
 internal/tasks       任务 handler
