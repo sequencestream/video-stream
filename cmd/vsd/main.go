@@ -23,6 +23,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
+	"github.com/sequencestream/video-stream/internal/scriptagents"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/tasks"
@@ -125,6 +126,19 @@ func run() error {
 		Logger:   logger,
 	})
 
+	scriptEngine := scriptagents.New(scriptagents.Options{
+		Store: taskStore,
+		Termination: scriptagents.TerminationConfig{
+			MaxRounds:            cfg.ScriptAgents.MaxRounds,
+			MetricImprovementMin: cfg.ScriptAgents.MetricImprovementMin,
+			MaxNewIssues:         cfg.ScriptAgents.MaxNewIssues,
+			StagnantRounds:       cfg.ScriptAgents.StagnantRounds,
+			CostPer1KTokensMicros: cfg.ScriptAgents.CostPer1KTokensMicros,
+		},
+		Reporter: reporter,
+		Logger:   logger,
+	})
+
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -156,6 +170,7 @@ func run() error {
 		Recompile:   recompiler,
 		Radar:       radarEngine,
 		Ideation:    ideationEngine,
+		ScriptAgents: scriptEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,
