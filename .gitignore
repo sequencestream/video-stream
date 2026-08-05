@@ -1,0 +1,34 @@
+# Build output
+/bin/
+/dist/
+*.exe
+
+# Local runtime data
+/data/
+/output/
+*.db
+*.db-shm
+*.db-wal
+
+# Config with secrets
+config.local.yaml
+.env
+.env.local
+
+# Node
+node_modules/
+.next/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+.codebuddy/
