@@ -203,6 +203,18 @@ CREATE TABLE IF NOT EXISTS style_packs (
 	document       TEXT NOT NULL,
 	created_at     INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hybrid_shots (
+	project_id     TEXT NOT NULL,
+	seg_id         TEXT NOT NULL,
+	route          TEXT NOT NULL,
+	reason         TEXT NOT NULL DEFAULT '',
+	stock_query    TEXT NOT NULL DEFAULT '',
+	ken_burns_json TEXT NOT NULL DEFAULT '',
+	stock_json     TEXT NOT NULL DEFAULT '',
+	updated_at     INTEGER NOT NULL,
+	PRIMARY KEY (project_id, seg_id)
+);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.

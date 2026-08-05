@@ -17,6 +17,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
+	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/httpapi"
 	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/logging"
@@ -157,6 +158,7 @@ func run() error {
 	}
 
 	visualEngine := visual.New(visual.Options{Store: taskStore, Reporter: reporter, Logger: logger})
+	hybridEngine := hybrid.New(hybrid.Options{Store: taskStore, Reporter: reporter, Logger: logger})
 
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
@@ -192,6 +194,7 @@ func run() error {
 		ScriptAgents: scriptEngine,
 		Compliance:   complianceEngine,
 		Visual:       visualEngine,
+		Hybrid:       hybridEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
 		Version:     version,
