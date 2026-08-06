@@ -42,6 +42,12 @@ export function WizardStepPanel({ step, previous, next }: Props) {
       {session && (
         <div className="mt-4 rounded border border-slate-800 bg-slate-900/40 p-3 text-sm text-slate-300">
           <p>状态: {session.status} · 步进: {session.current_step} · 成本: ${(session.cost_micros / 1_000_000).toFixed(3)}</p>
+          {session.state.cost_plan && (
+            <p className="mt-1 text-xs text-slate-400">
+              预估 ${(session.state.cost_plan.estimated_micros / 1_000_000).toFixed(3)} / 预算 ${(session.state.cost_plan.budget_micros / 1_000_000).toFixed(2)}
+              {session.state.cost_plan.degradation_level > 0 && ` · 降级 L${session.state.cost_plan.degradation_level}`}
+            </p>
+          )}
           {session.state.output_uri && <p className="mt-1 font-mono text-xs">{session.state.output_uri}</p>}
         </div>
       )}
