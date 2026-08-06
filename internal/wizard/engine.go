@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sequencestream/video-stream/internal/compliance"
+	"github.com/sequencestream/video-stream/internal/costwarden"
 	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/model"
@@ -42,6 +43,7 @@ type Options struct {
 	Compliance  *compliance.Engine
 	Render      *render.Engine
 	Recompile   *recompile.Engine
+	CostWarden  *costwarden.Engine
 	OutputDir   string
 	Reporter    telemetry.Reporter
 }
@@ -57,6 +59,7 @@ type Engine struct {
 	compliance *compliance.Engine
 	render     *render.Engine
 	recompile  *recompile.Engine
+	costwarden *costwarden.Engine
 	reporter   telemetry.Reporter
 }
 
@@ -66,6 +69,7 @@ func New(opts Options) *Engine {
 		store: opts.Store, projects: opts.Projects, radar: opts.Radar,
 		ideation: opts.Ideation, script: opts.Script, hybrid: opts.Hybrid,
 		compliance: opts.Compliance, render: opts.Render, recompile: opts.Recompile,
+		costwarden: opts.CostWarden,
 		reporter: opts.Reporter,
 	}
 	if e.reporter == nil {
@@ -255,14 +259,24 @@ func (e *Engine) completeScript(ctx context.Context, rec store.WizardSessionReco
 	project.ID = "wiz-" + rec.ID
 	project.Title = rec.Topic
 	project.Seal()
-	if e.projects != nil {
+	scriptCost := result.CostMicros + costPolishMicros
+	state, _ := decodeState(rec.StateJSON)
+	if e.costwarden != nil {
+		plan, err := e.costwarden.Plan(ctx, costwarden.PlanRequest{
+			Project: project, BudgetMicros: MaxCostMicrosUSD, ScriptCostMicros: scriptCost,
+		})
+		if err != nil {
+			return Session{}, err
+		}
+		project.CostPlan = &plan.CostPlan
+		state.CostPlan = &plan.CostPlan
+	} else if e.projects != nil {
 		if err := e.projects.SaveProject(ctx, project); err != nil {
 			return Session{}, err
 		}
 	}
 	rec.ProjectID = project.ID
 	rec.CurrentStep = StepAssets
-	state, _ := decodeState(rec.StateJSON)
 	return e.save(ctx, rec, state)
 }
 

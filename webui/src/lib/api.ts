@@ -14,6 +14,12 @@ export type WizardSession = {
     output_uri?: string;
     invalidated_segs?: number;
     total_segs?: number;
+    cost_plan?: {
+      estimated_micros: number;
+      budget_micros: number;
+      degradation_level: number;
+      decisions?: { level: number; action: string; reason: string; saved_micros: number }[];
+    };
   };
 };
 

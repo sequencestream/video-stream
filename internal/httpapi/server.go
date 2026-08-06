@@ -14,6 +14,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
+	"github.com/sequencestream/video-stream/internal/costwarden"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
@@ -59,6 +60,8 @@ type Deps struct {
 	Render *render.Engine
 	// Audio backs TTS synthesis, subtitles, and loudness normalization.
 	Audio *audio.Engine
+	// CostWarden backs script-stage cost estimation and degradation planning.
+	CostWarden *costwarden.Engine
 	// Wizard backs the end-to-end seven-step product flow.
 	Wizard *wizard.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
@@ -117,6 +120,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/render/runs/{id}", s.handleRenderRunByID)
 	mux.HandleFunc("POST /v1/audio/synthesize", s.handleAudioSynthesize)
 	mux.HandleFunc("GET /v1/audio/platforms", s.handleAudioPlatforms)
+	mux.HandleFunc("POST /v1/cost/estimate", s.handleCostEstimate)
+	mux.HandleFunc("POST /v1/cost/plan", s.handleCostPlan)
+	mux.HandleFunc("GET /v1/cost/capabilities", s.handleCostCapabilities)
 	mux.HandleFunc("POST /v1/wizard/sessions", s.handleWizardCreate)
 	mux.HandleFunc("GET /v1/wizard/sessions/{id}", s.handleWizardGet)
 	mux.HandleFunc("POST /v1/wizard/sessions/{id}/advance", s.handleWizardAdvance)

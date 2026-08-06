@@ -3,6 +3,8 @@ package wizard
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/sequencestream/video-stream/internal/model"
 )
 
 // AccountInput is one competitor account imported in step 1.
@@ -24,6 +26,7 @@ type SessionState struct {
 	TotalSegs       int                `json:"total_segs,omitempty"`
 	HookShownAt     time.Time          `json:"hook_shown_at,omitempty"`
 	Accounts        []AccountInput     `json:"accounts,omitempty"`
+	CostPlan        *model.CostPlan    `json:"cost_plan,omitempty"`
 }
 
 // TopicOption is one selectable topic card.

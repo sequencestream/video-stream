@@ -19,6 +19,7 @@ type Project struct {
 	RenderProfile RenderProfile `json:"render_profile"`
 	Segs          []Seg         `json:"segs"`
 	Timeline      Timeline      `json:"timeline"`
+	CostPlan      *CostPlan     `json:"cost_plan,omitempty"`
 	CreatedAt     time.Time     `json:"created_at"`
 	UpdatedAt     time.Time     `json:"updated_at"`
 }

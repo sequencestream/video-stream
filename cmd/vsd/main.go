@@ -17,6 +17,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
+	"github.com/sequencestream/video-stream/internal/costwarden"
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/httpapi"
@@ -103,6 +104,7 @@ func run() error {
 
 	registry := queue.NewRegistry()
 	audioEngine := audio.New(audio.Options{OutputDir: cfg.Storage.OutputDir, Reporter: reporter})
+	costEngine := costwarden.New(costwarden.Options{Projects: taskStore, Reporter: reporter})
 	renderEngine := render.New(render.Options{
 		Store: taskStore, Artifacts: taskStore, OutputDir: cfg.Storage.OutputDir,
 		Reporter: reporter, Audio: audioEngine,
@@ -172,7 +174,7 @@ func run() error {
 		Store: taskStore, Projects: taskStore,
 		Radar: radarEngine, Ideation: ideationEngine, Script: scriptEngine,
 		Hybrid: hybridEngine, Compliance: complianceEngine, Render: renderEngine,
-		Recompile: recompiler, Reporter: reporter,
+		Recompile: recompiler, CostWarden: costEngine, Reporter: reporter,
 	})
 
 	q := queue.NewInProcess(queue.Options{
@@ -212,6 +214,7 @@ func run() error {
 		Hybrid:       hybridEngine,
 		Render:       renderEngine,
 		Audio:        audioEngine,
+		CostWarden:   costEngine,
 		Wizard:       wizardEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
