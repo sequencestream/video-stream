@@ -36,6 +36,8 @@ import (
 	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/webui"
 	"github.com/sequencestream/video-stream/internal/wizard"
+	"github.com/sequencestream/video-stream/internal/youtube"
+	"github.com/sequencestream/video-stream/internal/youtube/notify"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -105,6 +107,11 @@ func run() error {
 	registry := queue.NewRegistry()
 	audioEngine := audio.New(audio.Options{OutputDir: cfg.Storage.OutputDir, Reporter: reporter})
 	costEngine := costwarden.New(costwarden.Options{Projects: taskStore, Reporter: reporter})
+	youtubeEngine := youtube.New(youtube.Options{
+		Store: taskStore, Credentials: credentials,
+		Notifier: notify.FromConfig(cfg.Notifications),
+		OutputDir: cfg.Storage.OutputDir, Reporter: reporter,
+	})
 	renderEngine := render.New(render.Options{
 		Store: taskStore, Artifacts: taskStore, OutputDir: cfg.Storage.OutputDir,
 		Reporter: reporter, Audio: audioEngine,
@@ -174,7 +181,7 @@ func run() error {
 		Store: taskStore, Projects: taskStore,
 		Radar: radarEngine, Ideation: ideationEngine, Script: scriptEngine,
 		Hybrid: hybridEngine, Compliance: complianceEngine, Render: renderEngine,
-		Recompile: recompiler, CostWarden: costEngine, Reporter: reporter,
+		Recompile: recompiler, CostWarden: costEngine, YouTube: youtubeEngine, Reporter: reporter,
 	})
 
 	q := queue.NewInProcess(queue.Options{
@@ -215,6 +222,7 @@ func run() error {
 		Render:       renderEngine,
 		Audio:        audioEngine,
 		CostWarden:   costEngine,
+		YouTube:      youtubeEngine,
 		Wizard:       wizardEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,
