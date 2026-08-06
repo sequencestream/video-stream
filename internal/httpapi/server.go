@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
@@ -56,6 +57,8 @@ type Deps struct {
 	Hybrid *hybrid.Engine
 	// Render backs the FFmpeg staged pipeline (720p preview / 1080p delivery).
 	Render *render.Engine
+	// Audio backs TTS synthesis, subtitles, and loudness normalization.
+	Audio *audio.Engine
 	// Wizard backs the end-to-end seven-step product flow.
 	Wizard *wizard.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
@@ -112,6 +115,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/hybrid/plans/{project_id}", s.handleHybridPlans)
 	mux.HandleFunc("POST /v1/render/run", s.handleRenderRun)
 	mux.HandleFunc("GET /v1/render/runs/{id}", s.handleRenderRunByID)
+	mux.HandleFunc("POST /v1/audio/synthesize", s.handleAudioSynthesize)
+	mux.HandleFunc("GET /v1/audio/platforms", s.handleAudioPlatforms)
 	mux.HandleFunc("POST /v1/wizard/sessions", s.handleWizardCreate)
 	mux.HandleFunc("GET /v1/wizard/sessions/{id}", s.handleWizardGet)
 	mux.HandleFunc("POST /v1/wizard/sessions/{id}/advance", s.handleWizardAdvance)
