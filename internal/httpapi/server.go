@@ -27,6 +27,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/visual"
 	"github.com/sequencestream/video-stream/internal/wizard"
+	"github.com/sequencestream/video-stream/internal/youtube"
 )
 
 // Deps are the collaborators the HTTP handlers need.
@@ -62,6 +63,8 @@ type Deps struct {
 	Audio *audio.Engine
 	// CostWarden backs script-stage cost estimation and degradation planning.
 	CostWarden *costwarden.Engine
+	// YouTube backs publish and delivery download.
+	YouTube *youtube.Engine
 	// Wizard backs the end-to-end seven-step product flow.
 	Wizard *wizard.Engine
 	// WebUI serves the embedded interface at "/". Nil leaves the root
@@ -123,6 +126,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/cost/estimate", s.handleCostEstimate)
 	mux.HandleFunc("POST /v1/cost/plan", s.handleCostPlan)
 	mux.HandleFunc("GET /v1/cost/capabilities", s.handleCostCapabilities)
+	mux.HandleFunc("POST /v1/youtube/publish", s.handleYouTubePublish)
+	mux.HandleFunc("GET /v1/youtube/uploads/{id}", s.handleYouTubeUploadByID)
+	mux.HandleFunc("GET /v1/delivery/download", s.handleDeliveryDownload)
 	mux.HandleFunc("POST /v1/wizard/sessions", s.handleWizardCreate)
 	mux.HandleFunc("GET /v1/wizard/sessions/{id}", s.handleWizardGet)
 	mux.HandleFunc("POST /v1/wizard/sessions/{id}/advance", s.handleWizardAdvance)

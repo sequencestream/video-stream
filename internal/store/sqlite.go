@@ -264,6 +264,18 @@ CREATE TABLE IF NOT EXISTS wizard_sessions (
 	created_at      INTEGER NOT NULL,
 	updated_at      INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS youtube_uploads (
+	id          TEXT PRIMARY KEY,
+	project_id  TEXT NOT NULL,
+	session_id  TEXT NOT NULL DEFAULT '',
+	video_id    TEXT NOT NULL DEFAULT '',
+	video_path  TEXT NOT NULL DEFAULT '',
+	status      TEXT NOT NULL,
+	error       TEXT NOT NULL DEFAULT '',
+	created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_youtube_uploads_project ON youtube_uploads(project_id, created_at);
 `
 
 // SQLiteStore is the SQLite-backed TaskStore and ProjectStore.

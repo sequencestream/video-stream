@@ -27,6 +27,7 @@ type SessionState struct {
 	HookShownAt     time.Time          `json:"hook_shown_at,omitempty"`
 	Accounts        []AccountInput     `json:"accounts,omitempty"`
 	CostPlan        *model.CostPlan    `json:"cost_plan,omitempty"`
+	YouTubeVideoID  string             `json:"youtube_video_id,omitempty"`
 }
 
 // TopicOption is one selectable topic card.

@@ -36,6 +36,7 @@ type Config struct {
 	Radar       Radar       `yaml:"radar"`
 	ScriptAgents ScriptAgents `yaml:"script_agents"`
 	Compliance   Compliance   `yaml:"compliance"`
+	Notifications Notifications `yaml:"notifications"`
 }
 
 // Radar controls the competitor radar polling schedule and rate limits.
@@ -57,6 +58,16 @@ type ScriptAgents struct {
 	MaxNewIssues         int     `yaml:"max_new_issues"`
 	StagnantRounds       int     `yaml:"stagnant_rounds"`
 	CostPer1KTokensMicros int64  `yaml:"cost_per_1k_tokens_micros"`
+}
+
+// Notifications configures completion webhook and email channels.
+type Notifications struct {
+	WebhookURL string `yaml:"webhook_url" json:"webhook_url"`
+	EmailTo    string `yaml:"email_to" json:"email_to"`
+	SMTPHost   string `yaml:"smtp_host" json:"smtp_host"`
+	SMTPPort   int    `yaml:"smtp_port" json:"smtp_port"`
+	SMTPFrom   string `yaml:"smtp_from" json:"smtp_from"`
+	SMTPUser   string `yaml:"smtp_user" json:"smtp_user"`
 }
 
 // Compliance controls inauthentic-differentiation gate thresholds.
@@ -250,6 +261,12 @@ func applyEnv(cfg *Config) {
 	setFloat(&cfg.Compliance.PassSimilarity, "VS_COMPLIANCE_PASS_SIMILARITY")
 	setInt(&cfg.Compliance.ReuseWindowDays, "VS_COMPLIANCE_REUSE_WINDOW_DAYS")
 	setInt(&cfg.Compliance.MaxReuses, "VS_COMPLIANCE_MAX_REUSES")
+	setString(&cfg.Notifications.WebhookURL, "VS_NOTIFY_WEBHOOK_URL")
+	setString(&cfg.Notifications.EmailTo, "VS_NOTIFY_EMAIL_TO")
+	setString(&cfg.Notifications.SMTPHost, "VS_SMTP_HOST")
+	setInt(&cfg.Notifications.SMTPPort, "VS_SMTP_PORT")
+	setString(&cfg.Notifications.SMTPFrom, "VS_SMTP_FROM")
+	setString(&cfg.Notifications.SMTPUser, "VS_SMTP_USER")
 }
 
 // Validate rejects configurations that would fail later in confusing ways.

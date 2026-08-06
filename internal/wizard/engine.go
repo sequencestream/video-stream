@@ -20,6 +20,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 	"github.com/sequencestream/video-stream/internal/youtube"
+	"github.com/sequencestream/video-stream/internal/youtube/notify"
 )
 
 const (
@@ -44,6 +45,7 @@ type Options struct {
 	Render      *render.Engine
 	Recompile   *recompile.Engine
 	CostWarden  *costwarden.Engine
+	YouTube     *youtube.Engine
 	OutputDir   string
 	Reporter    telemetry.Reporter
 }
@@ -60,6 +62,7 @@ type Engine struct {
 	render     *render.Engine
 	recompile  *recompile.Engine
 	costwarden *costwarden.Engine
+	youtube    *youtube.Engine
 	reporter   telemetry.Reporter
 }
 
@@ -69,7 +72,7 @@ func New(opts Options) *Engine {
 		store: opts.Store, projects: opts.Projects, radar: opts.Radar,
 		ideation: opts.Ideation, script: opts.Script, hybrid: opts.Hybrid,
 		compliance: opts.Compliance, render: opts.Render, recompile: opts.Recompile,
-		costwarden: opts.CostWarden,
+		costwarden: opts.CostWarden, youtube: opts.YouTube,
 		reporter: opts.Reporter,
 	}
 	if e.reporter == nil {
@@ -382,7 +385,24 @@ func (e *Engine) completeDeliver(ctx context.Context, rec store.WizardSessionRec
 	state, _ := decodeState(rec.StateJSON)
 	state.DeliveryRunID = result.RunID
 	state.OutputURI = result.OutputURI
-	_ = youtube.BuildUploadRequest(result.OutputURI, rec.Topic)
+	if e.youtube != nil {
+		pub, err := e.youtube.Publish(ctx, youtube.PublishRequest{
+			ProjectID: rec.ProjectID, SessionID: rec.ID,
+			VideoPath: result.OutputURI, Title: rec.Topic, Notify: true,
+		})
+		if err != nil && !errors.Is(err, youtube.ErrNoCredential) {
+			return Session{}, err
+		}
+		if err == nil {
+			state.YouTubeVideoID = pub.VideoID
+		} else {
+			_ = e.youtube.NotifyComplete(ctx, notify.Event{
+				ProjectID: rec.ProjectID, SessionID: rec.ID,
+				OutputURI: result.OutputURI, Title: rec.Topic,
+				CompletedAt: time.Now().UTC(),
+			})
+		}
+	}
 	rec.Status = statusCompleted
 	rec.CurrentStep = StepDeliver
 	sess, err := e.save(ctx, rec, state)

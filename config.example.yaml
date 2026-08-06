@@ -51,6 +51,16 @@ credentials:
   # Unlock it with VS_VAULT_PASSPHRASE, or let `vs` prompt on a terminal.
   vault_path: ""
 
+  vault_path: ""
+
+notifications:
+  webhook_url: "" # VS_NOTIFY_WEBHOOK_URL
+  email_to: "" # VS_NOTIFY_EMAIL_TO
+  smtp_host: ""
+  smtp_port: 587
+  smtp_from: "video-stream@localhost"
+  smtp_user: ""
+
 # Providers carry metadata only. Each one's key is looked up under
 # "provider/<name>" in the credential store.
 providers:
