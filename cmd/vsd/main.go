@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/credential"
@@ -101,8 +102,10 @@ func run() error {
 	})
 
 	registry := queue.NewRegistry()
+	audioEngine := audio.New(audio.Options{OutputDir: cfg.Storage.OutputDir, Reporter: reporter})
 	renderEngine := render.New(render.Options{
-		Store: taskStore, Artifacts: taskStore, OutputDir: cfg.Storage.OutputDir, Reporter: reporter,
+		Store: taskStore, Artifacts: taskStore, OutputDir: cfg.Storage.OutputDir,
+		Reporter: reporter, Audio: audioEngine,
 	})
 
 	tasks.Register(registry, tasks.Deps{
@@ -208,6 +211,7 @@ func run() error {
 		Visual:       visualEngine,
 		Hybrid:       hybridEngine,
 		Render:       renderEngine,
+		Audio:        audioEngine,
 		Wizard:       wizardEngine,
 		WebUI:       webui.Handler(),
 		Logger:      logger,

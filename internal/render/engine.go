@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/label"
 	"github.com/sequencestream/video-stream/internal/model"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -45,6 +46,7 @@ type Options struct {
 	Prompts   PromptGenerator
 	Reporter  telemetry.Reporter
 	Labels    label.Injector
+	Audio     *audio.Engine
 	// StageHook is for tests: return an error to simulate a stage failure.
 	StageHook func(stage string) error
 }
@@ -59,6 +61,7 @@ type Engine struct {
 	prompts   PromptGenerator
 	reporter  telemetry.Reporter
 	labels    label.Injector
+	audio     *audio.Engine
 	stageHook func(stage string) error
 }
 
@@ -68,6 +71,7 @@ func New(opts Options) *Engine {
 		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
 		ffmpeg: opts.FFmpeg, video: opts.Video, prompts: opts.Prompts,
 		reporter: opts.Reporter, stageHook: opts.StageHook, labels: opts.Labels,
+		audio: opts.Audio,
 	}
 	if e.labels == nil {
 		e.labels = label.SidecarInjector{}
@@ -275,11 +279,7 @@ func (e *Engine) runStage(ctx context.Context, req RunRequest, stage string, sha
 	case StageVisuals:
 		return e.runVisuals(ctx, req, shared)
 	case StageAudio, StageSubtitles, StageLoudness:
-		path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, stage+".wav")
-		if err := writeStubFile(path, stage); err != nil {
-			return nil, err
-		}
-		return []string{path}, nil
+		return e.runAudioStage(ctx, req, stage)
 	case StageBGMBeat:
 		path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, "bgm_aligned.wav")
 		if err := writeStubFile(path, "bgm"); err != nil {
@@ -425,4 +425,56 @@ func (e *Engine) GetRun(ctx context.Context, runID string) (store.RenderRunRecor
 		return store.RenderRunRecord{}, nil, err
 	}
 	return run, arts, nil
+}
+
+func (e *Engine) runAudioStage(ctx context.Context, req RunRequest, stage string) ([]string, error) {
+	runDir := filepath.Join(e.outputDir, req.Project.ID, req.RunID)
+	path := filepath.Join(runDir, stage+".wav")
+	if e.audio == nil {
+		if err := writeStubFile(path, stage); err != nil {
+			return nil, err
+		}
+		return []string{path}, nil
+	}
+
+	subdir := filepath.Join(req.Project.ID, req.RunID)
+	synth, err := e.audio.Synthesize(ctx, audio.SynthesizeRequest{
+		Project: req.Project, Platform: "youtube",
+		OutputSubdir: subdir,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	switch stage {
+	case StageAudio:
+		if err := copyFile(synth.AudioURI, path); err != nil {
+			return nil, err
+		}
+	case StageSubtitles:
+		subOut := filepath.Join(runDir, "subtitles.vtt")
+		if synth.Mode == audio.SubtitleBurnIn {
+			subOut = filepath.Join(runDir, "subtitles.mp4")
+		}
+		if err := copyFile(synth.SubtitleURI, subOut); err != nil {
+			return nil, err
+		}
+		path = subOut
+	case StageLoudness:
+		if err := copyFile(synth.AudioURI, path); err != nil {
+			return nil, err
+		}
+	}
+	return []string{path}, nil
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
 }
