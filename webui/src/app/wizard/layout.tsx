@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 
 import { WIZARD_STEPS } from '@/lib/wizard';
 
@@ -19,7 +20,9 @@ export default function WizardLayout({ children }: { children: React.ReactNode }
         <span className="text-sm text-slate-500">共 {WIZARD_STEPS.length} 步</span>
       </header>
 
-      <StepNav />
+		<Suspense fallback={null}>
+			<StepNav />
+		</Suspense>
 
       <main className="mt-8">{children}</main>
     </div>

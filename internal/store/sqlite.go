@@ -261,8 +261,33 @@ CREATE TABLE IF NOT EXISTS wizard_sessions (
 	failed_step     INTEGER NOT NULL DEFAULT 0,
 	error           TEXT NOT NULL DEFAULT '',
 	hook_confirm_ms INTEGER NOT NULL DEFAULT 0,
+	version         INTEGER NOT NULL DEFAULT 1,
+	active_operation_id TEXT NOT NULL DEFAULT '',
+	failed_operation_id TEXT NOT NULL DEFAULT '',
 	created_at      INTEGER NOT NULL,
 	updated_at      INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS wizard_operations (
+	operation_id     TEXT PRIMARY KEY,
+	session_id       TEXT NOT NULL DEFAULT '',
+	kind             TEXT NOT NULL,
+	step             INTEGER NOT NULL DEFAULT 0,
+	expected_version INTEGER NOT NULL DEFAULT 0,
+	request_json     TEXT NOT NULL DEFAULT '{}',
+	request_hash     TEXT NOT NULL,
+	status           TEXT NOT NULL,
+	result_json      TEXT NOT NULL DEFAULT '',
+	error_code       TEXT NOT NULL DEFAULT '',
+	error            TEXT NOT NULL DEFAULT '',
+	created_at       INTEGER NOT NULL,
+	updated_at       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wizard_operations_session ON wizard_operations(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	name       TEXT PRIMARY KEY,
+	applied_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS youtube_uploads (
@@ -309,7 +334,60 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := applySQLiteMigrations(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply migrations: %w", err)
+	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func applySQLiteMigrations(db *sql.DB) error {
+	const name = "001_wizard_operation_journal"
+	var applied int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name=?`, name).Scan(&applied); err != nil {
+		return err
+	}
+	if applied != 0 {
+		return nil
+	}
+	columns := []struct{ name, ddl string }{
+		{"version", `ALTER TABLE wizard_sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 1`},
+		{"active_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN active_operation_id TEXT NOT NULL DEFAULT ''`},
+		{"failed_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN failed_operation_id TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, column := range columns {
+		exists, err := sqliteColumnExists(db, "wizard_sessions", column.name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.Exec(column.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := db.Exec(`INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, time.Now().UTC().UnixMilli())
+	return err
+}
+
+func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Create inserts a new task row.

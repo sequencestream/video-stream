@@ -26,7 +26,9 @@ func (s *SQLiteStore) PutPolishRun(ctx context.Context, r PolishRunRecord) error
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO script_polish_runs (id, project_id, stop_reason, tokens_used, cost_micros, rounds, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id, stop_reason=excluded.stop_reason,
+		   tokens_used=excluded.tokens_used, cost_micros=excluded.cost_micros, rounds=excluded.rounds`,
 		r.ID, r.ProjectID, r.StopReason, r.TokensUsed, r.CostMicros, r.Rounds,
 		r.CreatedAt.UTC().UnixMilli())
 	if err != nil {

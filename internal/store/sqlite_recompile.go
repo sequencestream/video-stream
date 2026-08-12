@@ -85,7 +85,10 @@ func (s *SQLiteStore) RecordRun(ctx context.Context, r RecompileRun) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO recompile_runs (id, project_id, planned_at, total_segs, invalidated_segs,
 		                             full_rerun, boundary, cost_saved_micros)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id, planned_at=excluded.planned_at,
+		   total_segs=excluded.total_segs, invalidated_segs=excluded.invalidated_segs,
+		   full_rerun=excluded.full_rerun, boundary=excluded.boundary, cost_saved_micros=excluded.cost_saved_micros`,
 		r.ID, r.ProjectID, r.PlannedAt.UTC().UnixMilli(), r.TotalSegs, r.InvalidatedSegs,
 		boolToInt(r.FullRerun), r.Boundary, r.CostSavedMicros)
 	if err != nil {

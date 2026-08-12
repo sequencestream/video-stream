@@ -16,6 +16,7 @@ import (
 
 // PublishRequest starts a YouTube upload.
 type PublishRequest struct {
+	UploadID    string
 	ProjectID   string
 	SessionID   string
 	VideoPath   string
@@ -28,9 +29,9 @@ type PublishRequest struct {
 
 // PublishResult is the persisted upload outcome.
 type PublishResult struct {
-	UploadID string       `json:"upload_id"`
-	VideoID  string       `json:"video_id"`
-	URL      string       `json:"url,omitempty"`
+	UploadID string                    `json:"upload_id"`
+	VideoID  string                    `json:"video_id"`
+	URL      string                    `json:"url,omitempty"`
 	Record   store.YouTubeUploadRecord `json:"record"`
 }
 
@@ -80,6 +81,12 @@ func (e *Engine) Publish(ctx context.Context, req PublishRequest) (PublishResult
 	if e.store == nil {
 		return PublishResult{}, ErrNoStore
 	}
+	if req.UploadID != "" {
+		if existing, err := e.store.GetYouTubeUpload(ctx, req.UploadID); err == nil && existing.Status == "completed" {
+			return PublishResult{UploadID: existing.ID, VideoID: existing.VideoID,
+				URL: "https://youtu.be/" + existing.VideoID, Record: existing}, nil
+		}
+	}
 	path := req.VideoPath
 	if path == "" {
 		var err error
@@ -100,6 +107,14 @@ func (e *Engine) Publish(ctx context.Context, req PublishRequest) (PublishResult
 		return PublishResult{}, err
 	}
 
+	uploadID := req.UploadID
+	if uploadID == "" {
+		uploadID = newUploadID()
+	}
+	_ = e.store.PutYouTubeUpload(ctx, store.YouTubeUploadRecord{
+		ID: uploadID, ProjectID: req.ProjectID, SessionID: req.SessionID,
+		VideoPath: path, Status: "running", CreatedAt: time.Now().UTC(),
+	})
 	var result UploadResult
 	var lastErr error
 	for attempt := 0; attempt < MaxUploadRetries; attempt++ {
@@ -113,7 +128,7 @@ func (e *Engine) Publish(ctx context.Context, req PublishRequest) (PublishResult
 	}
 	if lastErr != nil {
 		rec := store.YouTubeUploadRecord{
-			ID: newUploadID(), ProjectID: req.ProjectID, VideoPath: path,
+			ID: uploadID, ProjectID: req.ProjectID, SessionID: req.SessionID, VideoPath: path,
 			Status: "failed", Error: lastErr.Error(), CreatedAt: time.Now().UTC(),
 		}
 		_ = e.store.PutYouTubeUpload(ctx, rec)
@@ -121,7 +136,7 @@ func (e *Engine) Publish(ctx context.Context, req PublishRequest) (PublishResult
 	}
 
 	rec := store.YouTubeUploadRecord{
-		ID: newUploadID(), ProjectID: req.ProjectID, SessionID: req.SessionID,
+		ID: uploadID, ProjectID: req.ProjectID, SessionID: req.SessionID,
 		VideoID: result.VideoID, VideoPath: path, Status: "completed",
 		CreatedAt: time.Now().UTC(),
 	}

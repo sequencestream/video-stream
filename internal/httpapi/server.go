@@ -416,6 +416,7 @@ func (s *Server) handleRecompileReport(w http.ResponseWriter, r *http.Request) {
 type errorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Session any    `json:"session,omitempty"`
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {

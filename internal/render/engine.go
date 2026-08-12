@@ -121,6 +121,22 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
+	if run.Status == "completed" {
+		shared, err := e.loadSharedContext(ctx, req.Project.ID)
+		if err != nil {
+			return RunResult{}, err
+		}
+		arts, err := e.store.RenderSegArtifacts(ctx, req.RunID)
+		if err != nil {
+			return RunResult{}, err
+		}
+		completed := append([]string(nil), StageOrder...)
+		if req.IncludeBGM {
+			completed = append(completed, StageBGMBeat)
+		}
+		return RunResult{RunID: run.ID, ProjectID: run.ProjectID, Resolution: req.Resolution,
+			OutputURI: run.OutputURI, CompletedStages: completed, SharedContext: shared, SegArtifacts: arts}, nil
+	}
 
 	startIdx := 0
 	if req.ResumeFrom != "" {
@@ -338,6 +354,9 @@ func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.Ren
 	if req.RunID != "" {
 		existing, err := e.store.GetRenderRun(ctx, req.RunID)
 		if err == nil {
+			if existing.ProjectID != req.Project.ID || existing.Resolution != string(req.Resolution) || existing.Finalized != req.Finalized {
+				return store.RenderRunRecord{}, fmt.Errorf("run id %s belongs to a different render request", req.RunID)
+			}
 			return existing, nil
 		}
 		if !errors.Is(err, store.ErrRenderRunNotFound) {

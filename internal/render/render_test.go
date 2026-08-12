@@ -137,6 +137,28 @@ func TestArtifactTracesToSeg(t *testing.T) {
 	}
 }
 
+func TestCompletedRunIsReturnedWithoutExecutingStagesAgain(t *testing.T) {
+	ctx := context.Background()
+	stageCalls := 0
+	eng := openEngine(t, render.Options{StageHook: func(string) error { stageCalls++; return nil }})
+	req := render.RunRequest{Project: sampleProject(t), Resolution: render.Resolution720p, RunID: "run-idempotent"}
+	first, err := eng.Run(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callsAfterFirst := stageCalls
+	second, err := eng.Run(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stageCalls != callsAfterFirst {
+		t.Fatalf("stage calls=%d want %d", stageCalls, callsAfterFirst)
+	}
+	if second.OutputURI != first.OutputURI {
+		t.Fatalf("output=%q want %q", second.OutputURI, first.OutputURI)
+	}
+}
+
 func Test720pPreviewCompletesQuickly(t *testing.T) {
 	ctx := context.Background()
 	eng := openEngine(t, render.Options{})

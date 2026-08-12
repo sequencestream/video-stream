@@ -77,6 +77,12 @@ func New(opts Options) *Engine {
 // pipeline, and a pipeline that fails because its observer did is worse than an
 // unobserved one.
 func (e *Engine) Plan(ctx context.Context, previous, next model.Project) (Plan, error) {
+	return e.PlanWithID(ctx, "", previous, next)
+}
+
+// PlanWithID records the plan under a stable id so retries replace the same
+// measurement instead of inflating the invalidation report.
+func (e *Engine) PlanWithID(ctx context.Context, runID string, previous, next model.Project) (Plan, error) {
 	nextOrder, err := next.RenderOrder()
 	if err != nil {
 		return Plan{}, fmt.Errorf("plan recompile of project %s: %w", next.ID, err)
@@ -95,7 +101,7 @@ func (e *Engine) Plan(ctx context.Context, previous, next model.Project) (Plan, 
 			plan.Boundary = boundary
 			plan.Reason = reason
 			plan.Invalidated = nextOrder
-			e.finish(ctx, plan)
+			e.finish(ctx, runID, plan)
 			return plan, nil
 		}
 	}
@@ -125,7 +131,7 @@ func (e *Engine) Plan(ctx context.Context, previous, next model.Project) (Plan, 
 		plan.Invalidated = append(plan.Invalidated, segID)
 	}
 
-	e.finish(ctx, plan)
+	e.finish(ctx, runID, plan)
 	return plan, nil
 }
 
@@ -156,10 +162,13 @@ func (e *Engine) lookup(ctx context.Context, key string) (store.Artifact, bool, 
 }
 
 // finish records and reports a plan. Neither failure is fatal; see Plan.
-func (e *Engine) finish(ctx context.Context, p Plan) {
+func (e *Engine) finish(ctx context.Context, runID string, p Plan) {
 	if e.runs != nil {
+		if runID == "" {
+			runID = newRunID()
+		}
 		run := store.RecompileRun{
-			ID:              newRunID(),
+			ID:              runID,
 			ProjectID:       p.ProjectID,
 			PlannedAt:       time.Now().UTC(),
 			TotalSegs:       p.TotalSegs(),
