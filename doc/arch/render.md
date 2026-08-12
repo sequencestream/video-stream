@@ -11,6 +11,8 @@ FFmpeg 直出 MP4；不解析剪映草稿回流。Stage 顺序：
 5. `mux` — 合成 MP4
 6. `bgm_beat` — BGM 卡点（**仅定稿后**）
 
+生产路径默认使用本机 `ffmpeg` 执行器；测试若不提供真实媒体 fixture，须显式注入 `StubFFmpeg`。执行器按输入顺序拼接同规格视频片段，选取最后生成的音轨，将 WebVTT/SRT 作为 `mov_text` 软字幕封装，并通过同目录临时文件原子发布最终 MP4。运行镜像内置 FFmpeg。
+
 ## 720p / 1080p 共享缓存
 
 - 720p 预览写入 `render_shared_context`（prompt + seed + ref）

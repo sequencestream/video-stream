@@ -40,9 +40,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"
 
 FROM alpine:3.22
 
-# wget backs the compose healthcheck; ca-certificates is needed once providers
-# are called over TLS.
-RUN apk add --no-cache ca-certificates wget \
+# wget backs the compose healthcheck, ffmpeg renders the final media, and
+# ca-certificates is needed once providers are called over TLS.
+RUN apk add --no-cache ca-certificates ffmpeg wget \
  && adduser -D -u 10001 app
 
 COPY --from=build /out/vsd /usr/local/bin/vsd

@@ -37,6 +37,9 @@ func openEngine(t *testing.T, opts render.Options) *render.Engine {
 	if opts.OutputDir == "" {
 		opts.OutputDir = filepath.Join(dir, "out")
 	}
+	if opts.FFmpeg == nil {
+		opts.FFmpeg = render.StubFFmpeg{}
+	}
 	opts.Store = db
 	opts.Artifacts = db
 	return render.New(opts)
