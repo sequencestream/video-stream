@@ -15,7 +15,7 @@
 ### 2. 实现最小可用的真实渲染链路
 
 - [ ] 实现真实 FFmpeg 执行器，替换默认 `StubFFmpeg`。
-- [ ] 实现可用的 TTS provider，输出真实 WAV/PCM 和词级时间戳。
+- [ ] 实现可用的 TTS provider，输出真实 WAV/PCM 和词级时间戳（使用 edge-tts 测试验证）。
 - [ ] 先支持本地图片/视频 + Ken Burns + motion graphics，生成每个 seg 的真实画面。
 - [ ] 实现音视频拼接、缩放、转码、转场和 MP4 mux。
 - [ ] 实现软字幕；随后补充 FFmpeg 字幕烧录。
