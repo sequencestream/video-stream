@@ -105,7 +105,20 @@ func run() error {
 	})
 
 	registry := queue.NewRegistry()
-	audioEngine := audio.New(audio.Options{OutputDir: cfg.Storage.OutputDir, Reporter: reporter})
+	var tts audio.TTS
+	switch cfg.Audio.Provider {
+	case "edge":
+		tts = audio.EdgeTTS{
+			OutputDir: cfg.Storage.OutputDir, DefaultVoice: cfg.Audio.DefaultVoice,
+			PythonBinary: cfg.Audio.PythonBinary, FFmpegBinary: cfg.Audio.FFmpegBinary,
+		}
+	case "stub":
+		tts = audio.StubTTS{MSPerWord: 180}
+	}
+	audioEngine := audio.New(audio.Options{
+		OutputDir: cfg.Storage.OutputDir, Reporter: reporter, TTS: tts,
+		FFmpegBinary: cfg.Audio.FFmpegBinary,
+	})
 	costEngine := costwarden.New(costwarden.Options{Projects: taskStore, Reporter: reporter})
 	youtubeEngine := youtube.New(youtube.Options{
 		Store: taskStore, Credentials: credentials,

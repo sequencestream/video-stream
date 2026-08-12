@@ -22,34 +22,36 @@ type SynthesizeRequest struct {
 
 // SynthesizeResult is the audio/subtitle output for a project.
 type SynthesizeResult struct {
-	ProjectID    string           `json:"project_id"`
-	Timeline     model.Timeline   `json:"timeline"`
-	AudioURI     string           `json:"audio_uri"`
-	SubtitleURI  string           `json:"subtitle_uri"`
-	MeasuredLUFS float64          `json:"measured_lufs"`
-	TargetLUFS   float64          `json:"target_lufs"`
-	GainDB       float64          `json:"gain_db"`
-	Mode         SubtitleMode     `json:"mode"`
-	Segments     []SegResult      `json:"segments"`
+	ProjectID    string         `json:"project_id"`
+	Timeline     model.Timeline `json:"timeline"`
+	AudioURI     string         `json:"audio_uri"`
+	SubtitleURI  string         `json:"subtitle_uri"`
+	MeasuredLUFS float64        `json:"measured_lufs"`
+	TargetLUFS   float64        `json:"target_lufs"`
+	GainDB       float64        `json:"gain_db"`
+	Mode         SubtitleMode   `json:"mode"`
+	Segments     []SegResult    `json:"segments"`
 }
 
 // Options configures the Engine.
 type Options struct {
-	TTS      TTS
-	OutputDir string
-	Reporter telemetry.Reporter
+	TTS          TTS
+	OutputDir    string
+	Reporter     telemetry.Reporter
+	FFmpegBinary string
 }
 
 // Engine runs TTS, timeline build, LUFS, and subtitle export.
 type Engine struct {
-	tts       TTS
-	outputDir string
-	reporter  telemetry.Reporter
+	tts          TTS
+	outputDir    string
+	reporter     telemetry.Reporter
+	ffmpegBinary string
 }
 
 // New builds an Engine.
 func New(opts Options) *Engine {
-	e := &Engine{tts: opts.TTS, outputDir: opts.OutputDir, reporter: opts.Reporter}
+	e := &Engine{tts: opts.TTS, outputDir: opts.OutputDir, reporter: opts.Reporter, ffmpegBinary: opts.FFmpegBinary}
 	if e.tts == nil {
 		e.tts = StubTTS{MSPerWord: 180}
 	}
@@ -110,7 +112,7 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 
 	audioPath := filepath.Join(outDir, "mix.wav")
 	subPath := filepath.Join(outDir, subtitleFilename(mode))
-	if err := writeStub(audioPath, "audio"); err != nil {
+	if err := writeAudioMix(ctx, e.ffmpegBinary, audioPath, segments); err != nil {
 		return SynthesizeResult{}, err
 	}
 	subBody := buildSubtitleBody(req.Project, segments, spec, mode, timeline.DurationMS())
@@ -118,14 +120,19 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 		return SynthesizeResult{}, err
 	}
 
-	measured := MeasureStub(audioPath, spec.TargetLUFS)
-	gain, _ := NormalizeLUFS(measured, spec.TargetLUFS, spec.LUFSTolerance)
-	if gain != 0 {
-		if err := writeStub(audioPath, fmt.Sprintf("audio gain=%.2f", gain)); err != nil {
-			return SynthesizeResult{}, err
+	// Real LUFS measurement is a later pipeline item. Preserve a real PCM mix;
+	// the old deterministic normalization fixture is only meaningful for the
+	// explicit StubTTS test provider.
+	measured, gain := spec.TargetLUFS, 0.0
+	if segmentsAreStub(segments) {
+		measured = MeasureStub(audioPath, spec.TargetLUFS)
+		gain, _ = NormalizeLUFS(measured, spec.TargetLUFS, spec.LUFSTolerance)
+		if gain != 0 {
+			if err := writeStub(audioPath, fmt.Sprintf("audio gain=%.2f", gain)); err != nil {
+				return SynthesizeResult{}, err
+			}
+			measured = spec.TargetLUFS
 		}
-		measured, _ = NormalizeLUFS(measured+gain, spec.TargetLUFS, spec.LUFSTolerance)
-		measured = spec.TargetLUFS
 	}
 
 	_ = telemetry.Report(ctx, e.reporter, "audio.synthesized", map[string]any{

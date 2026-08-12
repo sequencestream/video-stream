@@ -24,19 +24,28 @@ import (
 
 // Config is the full runtime configuration.
 type Config struct {
-	Server      Server      `yaml:"server"`
-	Sidecar     Sidecar     `yaml:"sidecar"`
-	Storage     Storage     `yaml:"storage"`
-	Budget      Budget      `yaml:"budget"`
-	Logging     Logging     `yaml:"logging"`
-	Telemetry   Telemetry   `yaml:"telemetry"`
-	Queue       Queue       `yaml:"queue"`
-	Credentials Credentials `yaml:"credentials"`
-	Providers   []Provider  `yaml:"providers"`
-	Radar       Radar       `yaml:"radar"`
-	ScriptAgents ScriptAgents `yaml:"script_agents"`
-	Compliance   Compliance   `yaml:"compliance"`
+	Server        Server        `yaml:"server"`
+	Sidecar       Sidecar       `yaml:"sidecar"`
+	Storage       Storage       `yaml:"storage"`
+	Audio         Audio         `yaml:"audio"`
+	Budget        Budget        `yaml:"budget"`
+	Logging       Logging       `yaml:"logging"`
+	Telemetry     Telemetry     `yaml:"telemetry"`
+	Queue         Queue         `yaml:"queue"`
+	Credentials   Credentials   `yaml:"credentials"`
+	Providers     []Provider    `yaml:"providers"`
+	Radar         Radar         `yaml:"radar"`
+	ScriptAgents  ScriptAgents  `yaml:"script_agents"`
+	Compliance    Compliance    `yaml:"compliance"`
 	Notifications Notifications `yaml:"notifications"`
+}
+
+// Audio selects the text-to-speech implementation used by the daemon.
+type Audio struct {
+	Provider     string `yaml:"provider"`
+	DefaultVoice string `yaml:"default_voice"`
+	PythonBinary string `yaml:"python_binary"`
+	FFmpegBinary string `yaml:"ffmpeg_binary"`
 }
 
 // Radar controls the competitor radar polling schedule and rate limits.
@@ -53,11 +62,11 @@ type Radar struct {
 
 // ScriptAgents controls the multi-agent script polish loop termination thresholds.
 type ScriptAgents struct {
-	MaxRounds            int     `yaml:"max_rounds"`
-	MetricImprovementMin float64 `yaml:"metric_improvement_min"`
-	MaxNewIssues         int     `yaml:"max_new_issues"`
-	StagnantRounds       int     `yaml:"stagnant_rounds"`
-	CostPer1KTokensMicros int64  `yaml:"cost_per_1k_tokens_micros"`
+	MaxRounds             int     `yaml:"max_rounds"`
+	MetricImprovementMin  float64 `yaml:"metric_improvement_min"`
+	MaxNewIssues          int     `yaml:"max_new_issues"`
+	StagnantRounds        int     `yaml:"stagnant_rounds"`
+	CostPer1KTokensMicros int64   `yaml:"cost_per_1k_tokens_micros"`
 }
 
 // Notifications configures completion webhook and email channels.
@@ -177,9 +186,13 @@ func (c Config) Provider(name string) (Provider, bool) {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Server:      Server{Addr: ":8080"},
-		Sidecar:     Sidecar{BaseURL: "http://127.0.0.1:8090", Timeout: 5 * time.Second},
-		Storage:     Storage{DataDir: "./data", OutputDir: "./output"},
+		Server:  Server{Addr: ":8080"},
+		Sidecar: Sidecar{BaseURL: "http://127.0.0.1:8090", Timeout: 5 * time.Second},
+		Storage: Storage{DataDir: "./data", OutputDir: "./output"},
+		Audio: Audio{
+			Provider: "edge", DefaultVoice: "zh-CN-XiaoxiaoNeural",
+			PythonBinary: "python3", FFmpegBinary: "ffmpeg",
+		},
 		Budget:      Budget{MaxCostPerVideoUSD: 2.0, DailyCapUSD: 20.0},
 		Logging:     Logging{Level: "info", Format: "json"},
 		Queue:       Queue{Workers: 2, Buffer: 64},
@@ -190,10 +203,10 @@ func Default() Config {
 			Burst:     1,
 		},
 		ScriptAgents: ScriptAgents{
-			MaxRounds:            3,
-			MetricImprovementMin: 0.03,
-			MaxNewIssues:         1,
-			StagnantRounds:       2,
+			MaxRounds:             3,
+			MetricImprovementMin:  0.03,
+			MaxNewIssues:          1,
+			StagnantRounds:        2,
 			CostPer1KTokensMicros: 500,
 		},
 		Compliance: Compliance{
@@ -239,6 +252,10 @@ func applyEnv(cfg *Config) {
 	setDuration(&cfg.Sidecar.Timeout, "VS_SIDECAR_TIMEOUT")
 	setString(&cfg.Storage.DataDir, "VS_DATA_DIR")
 	setString(&cfg.Storage.OutputDir, "VS_OUTPUT_DIR")
+	setString(&cfg.Audio.Provider, "VS_TTS_PROVIDER")
+	setString(&cfg.Audio.DefaultVoice, "VS_TTS_VOICE")
+	setString(&cfg.Audio.PythonBinary, "VS_TTS_PYTHON_BINARY")
+	setString(&cfg.Audio.FFmpegBinary, "VS_TTS_FFMPEG_BINARY")
 	setFloat(&cfg.Budget.MaxCostPerVideoUSD, "VS_MAX_COST_PER_VIDEO_USD")
 	setFloat(&cfg.Budget.DailyCapUSD, "VS_DAILY_CAP_USD")
 	setString(&cfg.Logging.Level, "VS_LOG_LEVEL")
@@ -288,6 +305,21 @@ func (c Config) Validate() error {
 	}
 	if c.Budget.MaxCostPerVideoUSD < 0 || c.Budget.DailyCapUSD < 0 {
 		return fmt.Errorf("budget caps must not be negative")
+	}
+	switch c.Audio.Provider {
+	case "edge":
+		if strings.TrimSpace(c.Audio.DefaultVoice) == "" {
+			return fmt.Errorf("audio.default_voice must not be empty for edge TTS")
+		}
+		if strings.TrimSpace(c.Audio.PythonBinary) == "" {
+			return fmt.Errorf("audio.python_binary must not be empty for edge TTS")
+		}
+		if strings.TrimSpace(c.Audio.FFmpegBinary) == "" {
+			return fmt.Errorf("audio.ffmpeg_binary must not be empty for edge TTS")
+		}
+	case "stub":
+	default:
+		return fmt.Errorf("audio.provider must be edge or stub, got %q", c.Audio.Provider)
 	}
 	if c.Radar.Interval < 0 {
 		return fmt.Errorf("radar.interval must not be negative, got %s", c.Radar.Interval)

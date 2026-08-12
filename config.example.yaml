@@ -19,6 +19,13 @@ storage:
   data_dir: "./data" # VS_DATA_DIR — holds video-stream.db
   output_dir: "./output" # VS_OUTPUT_DIR — holds rendered artifacts
 
+audio:
+  # edge is the production default; stub is only for offline development/tests.
+  provider: "edge" # VS_TTS_PROVIDER — edge | stub
+  default_voice: "zh-CN-XiaoxiaoNeural" # VS_TTS_VOICE
+  python_binary: "python3" # VS_TTS_PYTHON_BINARY; must have the edge-tts package
+  ffmpeg_binary: "ffmpeg" # VS_TTS_FFMPEG_BINARY
+
 budget:
   max_cost_per_video_usd: 2.0 # VS_MAX_COST_PER_VIDEO_USD
   daily_cap_usd: 20.0 # VS_DAILY_CAP_USD
