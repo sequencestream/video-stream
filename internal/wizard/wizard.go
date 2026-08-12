@@ -20,12 +20,24 @@ const (
 )
 
 var (
-	ErrNoStore        = errors.New("wizard has no store configured")
-	ErrSessionNotFound = errors.New("wizard session not found")
-	ErrWrongStep      = errors.New("wizard action does not match the current step")
-	ErrBudgetExceeded = errors.New("wizard run exceeded the $1 budget cap")
-	ErrSessionFailed  = errors.New("wizard session is in failed state; resume from failed step")
+	ErrNoStore           = errors.New("wizard has no store configured")
+	ErrSessionNotFound   = errors.New("wizard session not found")
+	ErrWrongStep         = errors.New("wizard action does not match the current step")
+	ErrBudgetExceeded    = errors.New("wizard run exceeded the $1 budget cap")
+	ErrSessionFailed     = errors.New("wizard session is in failed state; resume from failed step")
+	ErrOperationRequired = errors.New("operation_id is required and must be a UUID")
+	ErrVersionRequired   = errors.New("expected_version must be positive")
 )
+
+// RequestError carries a stable API error code and, for stale clients, the
+// authoritative session snapshot they should render next.
+type RequestError struct {
+	Code    string
+	Message string
+	Session *Session
+}
+
+func (e *RequestError) Error() string { return e.Message }
 
 // StepTitle returns the human title for a step id.
 func StepTitle(step int) string {

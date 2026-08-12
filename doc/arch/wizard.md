@@ -18,9 +18,13 @@ GET  /v1/wizard/sessions/{id}
 POST /v1/wizard/sessions/{id}/advance
 ```
 
+所有写请求携带 UUID `operation_id`。`advance` 还须携带 GET/上次响应中的
+`expected_version`；重复 operation 返回首次结果，过期版本返回最新会话，避免重试串步。
+
 ## WebUI
 
-`/wizard/1` … `/wizard/7` 调用上述 API。会话 ID 在步间由前端 state 持有；刷新后可用 GET 恢复。
+`/wizard/1` … `/wizard/7` 调用上述 API。会话 ID 写入 `?session=` 并在本地存储保留最近值；
+刷新、步骤跳转或服务重启后通过 GET 恢复，以服务端 `current_step` 为准。
 
 ## 成本
 
@@ -28,4 +32,9 @@ POST /v1/wizard/sessions/{id}/advance
 
 ## 续跑
 
-`status=failed` 时 `POST .../advance` 带 `"resume": true` 从 `failed_step` 继续。
+`status=failed` 时，用新的 operation id、当前 version 和 `"resume": true` 调用 advance。
+服务端从失败 operation journal 读取原输入并从 `failed_step` 继续。服务启动会把遗留的
+`running` operation 标记为 `interrupted`，等待用户显式续跑，不自动重复外部调用。
+
+SQLite 内的会话、成本和渲染记录严格幂等。YouTube 等平台调用使用稳定上传记录尽力去重；
+平台已接受但本地尚未来得及确认时崩溃，不承诺跨系统 exactly-once。

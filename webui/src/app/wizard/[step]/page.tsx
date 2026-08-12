@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { Suspense } from 'react';
 
 import { WIZARD_STEPS, findStep, parseStepId } from '@/lib/wizard';
 
@@ -17,5 +18,9 @@ export default async function WizardStepPage({ params }: { params: Promise<{ ste
   }
   const previous = findStep(step.id - 1);
   const next = findStep(step.id + 1);
-  return <WizardStepPanel step={step} previous={previous} next={next} />;
+  return (
+		<Suspense fallback={<p className="text-sm text-slate-500">正在恢复会话…</p>}>
+			<WizardStepPanel step={step} previous={previous} next={next} />
+		</Suspense>
+	);
 }

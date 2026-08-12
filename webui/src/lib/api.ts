@@ -7,6 +7,9 @@ export type WizardSession = {
   topic: string;
   category: string;
   cost_micros: number;
+  version: number;
+  failed_step?: number;
+  error?: string;
   hook_confirm_ms?: number;
   state: {
     topic_cards?: { id: string; title: string; rationale: string }[];
@@ -23,9 +26,16 @@ export type WizardSession = {
   };
 };
 
+export class WizardAPIError extends Error {
+  constructor(public code: string, message: string, public session?: WizardSession) {
+    super(message);
+  }
+}
+
 const base = '';
 
 export async function createWizardSession(body: {
+  operation_id: string;
   topic: string;
   category: string;
   accounts: { platform: string; handle: string }[];
@@ -35,13 +45,13 @@ export async function createWizardSession(body: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw await wizardError(res);
   return res.json();
 }
 
 export async function getWizardSession(id: string): Promise<WizardSession> {
   const res = await fetch(`${base}/v1/wizard/sessions/${id}`);
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw await wizardError(res);
   return res.json();
 }
 
@@ -54,6 +64,15 @@ export async function advanceWizardSession(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw await wizardError(res);
   return res.json();
+}
+
+async function wizardError(res: Response): Promise<WizardAPIError> {
+  try {
+    const body = await res.json() as { code?: string; message?: string; session?: WizardSession };
+    return new WizardAPIError(body.code ?? 'request_failed', body.message ?? res.statusText, body.session);
+  } catch {
+    return new WizardAPIError('request_failed', `${res.status} ${res.statusText}`);
+  }
 }

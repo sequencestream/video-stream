@@ -19,21 +19,21 @@ import (
 	"github.com/sequencestream/video-stream/internal/config"
 	"github.com/sequencestream/video-stream/internal/costwarden"
 	"github.com/sequencestream/video-stream/internal/credential"
-	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/httpapi"
+	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/logging"
 	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
+	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/scriptagents"
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/tasks"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 	"github.com/sequencestream/video-stream/internal/visual"
-	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/webui"
 	"github.com/sequencestream/video-stream/internal/wizard"
 	"github.com/sequencestream/video-stream/internal/youtube"
@@ -109,7 +109,7 @@ func run() error {
 	costEngine := costwarden.New(costwarden.Options{Projects: taskStore, Reporter: reporter})
 	youtubeEngine := youtube.New(youtube.Options{
 		Store: taskStore, Credentials: credentials,
-		Notifier: notify.FromConfig(cfg.Notifications),
+		Notifier:  notify.FromConfig(cfg.Notifications),
 		OutputDir: cfg.Storage.OutputDir, Reporter: reporter,
 	})
 	renderEngine := render.New(render.Options{
@@ -150,10 +150,10 @@ func run() error {
 	scriptEngine := scriptagents.New(scriptagents.Options{
 		Store: taskStore,
 		Termination: scriptagents.TerminationConfig{
-			MaxRounds:            cfg.ScriptAgents.MaxRounds,
-			MetricImprovementMin: cfg.ScriptAgents.MetricImprovementMin,
-			MaxNewIssues:         cfg.ScriptAgents.MaxNewIssues,
-			StagnantRounds:       cfg.ScriptAgents.StagnantRounds,
+			MaxRounds:             cfg.ScriptAgents.MaxRounds,
+			MetricImprovementMin:  cfg.ScriptAgents.MetricImprovementMin,
+			MaxNewIssues:          cfg.ScriptAgents.MaxNewIssues,
+			StagnantRounds:        cfg.ScriptAgents.StagnantRounds,
 			CostPer1KTokensMicros: cfg.ScriptAgents.CostPer1KTokensMicros,
 		},
 		Reporter: reporter,
@@ -183,6 +183,11 @@ func run() error {
 		Hybrid: hybridEngine, Compliance: complianceEngine, Render: renderEngine,
 		Recompile: recompiler, CostWarden: costEngine, YouTube: youtubeEngine, Reporter: reporter,
 	})
+	if recovered, err := wizardEngine.RecoverInterrupted(context.Background()); err != nil {
+		return fmt.Errorf("recover interrupted wizard operations: %w", err)
+	} else if recovered > 0 {
+		logger.Warn("recovered interrupted wizard operations", slog.Int("count", recovered))
+	}
 
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
@@ -207,14 +212,14 @@ func run() error {
 	logger.Info("webui", slog.Bool("embedded", webui.Built()))
 
 	api := httpapi.NewServer(httpapi.Deps{
-		Config:      cfg,
-		Store:       taskStore,
-		Queue:       q,
-		Sidecar:     sidecarClient,
-		Credentials: credentials,
-		Recompile:   recompiler,
-		Radar:       radarEngine,
-		Ideation:    ideationEngine,
+		Config:       cfg,
+		Store:        taskStore,
+		Queue:        q,
+		Sidecar:      sidecarClient,
+		Credentials:  credentials,
+		Recompile:    recompiler,
+		Radar:        radarEngine,
+		Ideation:     ideationEngine,
 		ScriptAgents: scriptEngine,
 		Compliance:   complianceEngine,
 		Visual:       visualEngine,
@@ -224,9 +229,9 @@ func run() error {
 		CostWarden:   costEngine,
 		YouTube:      youtubeEngine,
 		Wizard:       wizardEngine,
-		WebUI:       webui.Handler(),
-		Logger:      logger,
-		Version:     version,
+		WebUI:        webui.Handler(),
+		Logger:       logger,
+		Version:      version,
 	})
 
 	srv := &http.Server{

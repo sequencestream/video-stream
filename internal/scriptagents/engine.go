@@ -15,6 +15,7 @@ import (
 
 // PolishRequest starts a script polishing run.
 type PolishRequest struct {
+	RunID      string   `json:"run_id,omitempty"`
 	Topic      string   `json:"topic"`
 	UserQuotes []string `json:"user_quotes,omitempty"`
 	Spike      string   `json:"spike,omitempty"`
@@ -24,13 +25,13 @@ type PolishRequest struct {
 
 // PolishResult is the outcome of one polish run.
 type PolishResult struct {
-	RunID       string           `json:"run_id"`
-	Project     model.Project    `json:"project"`
-	Rounds      []RoundMetrics   `json:"rounds"`
-	StopReason  string           `json:"stop_reason"`
-	TokensUsed  int64            `json:"tokens_used"`
-	CostMicros  int64            `json:"cost_micros"`
-	WinnerDraft Direction        `json:"winner_direction"`
+	RunID       string         `json:"run_id"`
+	Project     model.Project  `json:"project"`
+	Rounds      []RoundMetrics `json:"rounds"`
+	StopReason  string         `json:"stop_reason"`
+	TokensUsed  int64          `json:"tokens_used"`
+	CostMicros  int64          `json:"cost_micros"`
+	WinnerDraft Direction      `json:"winner_direction"`
 }
 
 // Store persists polish runs.
@@ -41,13 +42,13 @@ type Store interface {
 
 // Options configures the Engine.
 type Options struct {
-	Store      Store
-	Writer     Writer
-	Audience   AudienceSimulator
-	Judge      Judge
+	Store       Store
+	Writer      Writer
+	Audience    AudienceSimulator
+	Judge       Judge
 	Termination TerminationConfig
-	Reporter   telemetry.Reporter
-	Logger     *slog.Logger
+	Reporter    telemetry.Reporter
+	Logger      *slog.Logger
 }
 
 // Engine orchestrates the polish loop.
@@ -208,7 +209,10 @@ func (e *Engine) Polish(ctx context.Context, req PolishRequest) (PolishResult, e
 	}
 
 	cost := RunSkills(winner, e.termination).CostMicros
-	runID := newRunID()
+	runID := req.RunID
+	if runID == "" {
+		runID = newRunID()
+	}
 	result := PolishResult{
 		RunID: runID, Project: project, Rounds: history, StopReason: stopReason,
 		TokensUsed: tokens, CostMicros: cost, WinnerDraft: winner.Direction,

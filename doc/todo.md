@@ -8,9 +8,9 @@
 
 - [x] `completeScript` 在启用 CostWarden 时仍须调用 `SaveProject`。
 - [x] 增加 Step 1 → Step 7 的向导集成测试，确保脚本定稿后 Step 5 能读取工程。
-- [ ] 覆盖失败步骤的 `resume`、服务重启后的会话恢复和重复提交幂等性。
+- [x] 覆盖失败步骤的 `resume`、服务重启后的会话恢复和重复提交幂等性。
 
-当前风险：`internal/wizard/engine.go` 仅在未启用 CostWarden 时显式保存工程，而主服务默认启用了 CostWarden，可能导致素材步骤读取工程失败。
+向导写操作通过持久化 operation journal 和 session version 防止重复计费、并发串步；服务重启将中断操作转为可显式续跑的失败状态。
 
 ### 2. 实现最小可用的真实渲染链路
 
@@ -59,7 +59,7 @@
 
 ### 6. 完善 7 步 WebUI
 
-- [ ] 将 session id 写入 URL 或持久化存储，刷新后通过 GET 恢复。
+- [x] 将 session id 写入 URL 或持久化存储，刷新后通过 GET 恢复。
 - [ ] 支持录入、编辑和选择真实对标账号，移除硬编码 `@peer1`。
 - [ ] 展示 radar 信号、结构卡片来源和选题依据。
 - [ ] 支持 Hook 选择与人工改写，并正确提交 `hook_edit`。
