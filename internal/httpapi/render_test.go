@@ -18,7 +18,7 @@ func wireRender(t *testing.T, deps *Deps) {
 	if !ok {
 		t.Fatal("want SQLiteStore")
 	}
-	deps.Render = render.New(render.Options{Store: s, Artifacts: s, OutputDir: t.TempDir()})
+	deps.Render = render.New(render.Options{Store: s, Artifacts: s, OutputDir: t.TempDir(), FFmpeg: render.StubFFmpeg{}})
 }
 
 func TestRenderRunWithoutEngineReturns503(t *testing.T) {

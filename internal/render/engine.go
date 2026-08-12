@@ -65,7 +65,8 @@ type Engine struct {
 	stageHook func(stage string) error
 }
 
-// New builds an Engine with sensible defaults for tests.
+// New builds an Engine with production-safe defaults. Tests without real media
+// fixtures should explicitly inject StubFFmpeg and StubVideoGenerator.
 func New(opts Options) *Engine {
 	e := &Engine{
 		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
@@ -77,7 +78,7 @@ func New(opts Options) *Engine {
 		e.labels = label.SidecarInjector{}
 	}
 	if e.ffmpeg == nil {
-		e.ffmpeg = StubFFmpeg{}
+		e.ffmpeg = ExecFFmpeg{}
 	}
 	if e.video == nil {
 		e.video = StubVideoGenerator{OutputDir: opts.OutputDir}
