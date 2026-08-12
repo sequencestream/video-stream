@@ -161,6 +161,10 @@ curl -s -X POST localhost:8080/v1/hybrid/plan \
 
 `internal/render` 以 FFmpeg stage 化直出 MP4；720p 预览与 1080p 出片共享 prompt/seed/ref，高清阶段无 LLM。BGM 卡点仅定稿后可跑。
 
+音频默认由 Edge TTS 合成，使用服务端原始词边界生成时间线，并输出 48 kHz 单声道 PCM WAV。
+本地运行需安装 Python `edge-tts` 包与 FFmpeg；容器镜像已包含二者。离线开发可设置
+`VS_TTS_PROVIDER=stub`，但该模式不会产生可播放音频。
+
 ```bash
 curl -s -X POST localhost:8080/v1/render/run \
   -H 'Content-Type: application/json' \

@@ -10,11 +10,11 @@ import (
 
 // SegResult is TTS output for one seg.
 type SegResult struct {
-	SegID      string
-	ActualMS   int64
-	Rate       float64
-	Tokens     []model.Token
-	AudioURI   string
+	SegID    string        `json:"seg_id"`
+	ActualMS int64         `json:"actual_ms"`
+	Rate     float64       `json:"rate"`
+	Tokens   []model.Token `json:"tokens"`
+	AudioURI string        `json:"audio_uri"`
 }
 
 // TTS synthesizes speech for one seg.
