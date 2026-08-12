@@ -9,6 +9,7 @@ import (
 
 	"github.com/sequencestream/video-stream/internal/compliance"
 	"github.com/sequencestream/video-stream/internal/config"
+	"github.com/sequencestream/video-stream/internal/costwarden"
 	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
 	"github.com/sequencestream/video-stream/internal/radar"
@@ -43,7 +44,7 @@ func openWizardEngine(t *testing.T) (*wizard.Engine, *store.SQLiteStore) {
 	}
 	eng := wizard.New(wizard.Options{
 		Store: db, Projects: db,
-		Radar: radar.New(radar.Options{Store: db}),
+		Radar:    radar.New(radar.Options{Store: db}),
 		Ideation: ideation.New(ideation.Options{Store: db}),
 		Script: scriptagents.New(scriptagents.Options{
 			Store: db,
@@ -52,17 +53,20 @@ func openWizardEngine(t *testing.T) (*wizard.Engine, *store.SQLiteStore) {
 				MaxNewIssues: 2, StagnantRounds: 2,
 			},
 		}),
-		Hybrid: hybrid.New(hybrid.Options{Store: db}),
+		Hybrid:     hybrid.New(hybrid.Options{Store: db}),
 		Compliance: comp,
-		Render: render.New(render.Options{Store: db, Artifacts: db, OutputDir: out}),
-		Recompile: recompile.New(recompile.Options{Cache: db, Runs: db}),
+		Render:     render.New(render.Options{Store: db, Artifacts: db, OutputDir: out}),
+		Recompile:  recompile.New(recompile.Options{Cache: db, Runs: db}),
+		// Deliberately leave CostWarden.Projects nil. The wizard, rather than an
+		// optional CostWarden side effect, must persist the project it produces.
+		CostWarden: costwarden.New(costwarden.Options{}),
 	})
 	return eng, db
 }
 
-func TestE2ESevenStepsProduces1080p(t *testing.T) {
+func TestE2ESevenStepsPersistsProjectAndProduces1080p(t *testing.T) {
 	ctx := context.Background()
-	eng, _ := openWizardEngine(t)
+	eng, db := openWizardEngine(t)
 
 	sess, err := eng.Create(ctx, wizard.CreateRequest{
 		Topic: "creator burnout", Category: "education",
@@ -92,6 +96,16 @@ func TestE2ESevenStepsProduces1080p(t *testing.T) {
 	sess, err = eng.Advance(ctx, sess.ID, wizard.AdvanceRequest{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	project, err := db.GetProject(ctx, sess.ProjectID)
+	if err != nil {
+		t.Fatalf("project must be persisted when script step completes: %v", err)
+	}
+	if project.CostPlan == nil || sess.State.CostPlan == nil {
+		t.Fatalf("cost plan must be persisted on project and session: project=%+v session=%+v", project.CostPlan, sess.State.CostPlan)
+	}
+	if project.CostPlan.EstimatedMicros != sess.State.CostPlan.EstimatedMicros {
+		t.Fatalf("stored project cost estimate = %d, session = %d", project.CostPlan.EstimatedMicros, sess.State.CostPlan.EstimatedMicros)
 	}
 	sess, err = eng.Advance(ctx, sess.ID, wizard.AdvanceRequest{})
 	if err != nil {
