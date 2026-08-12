@@ -35,19 +35,19 @@ const (
 
 // Options wires the wizard to backend engines.
 type Options struct {
-	Store       store.WizardStore
-	Projects    store.ProjectStore
-	Radar       *radar.Engine
-	Ideation    *ideation.Engine
-	Script      *scriptagents.Engine
-	Hybrid      *hybrid.Engine
-	Compliance  *compliance.Engine
-	Render      *render.Engine
-	Recompile   *recompile.Engine
-	CostWarden  *costwarden.Engine
-	YouTube     *youtube.Engine
-	OutputDir   string
-	Reporter    telemetry.Reporter
+	Store      store.WizardStore
+	Projects   store.ProjectStore
+	Radar      *radar.Engine
+	Ideation   *ideation.Engine
+	Script     *scriptagents.Engine
+	Hybrid     *hybrid.Engine
+	Compliance *compliance.Engine
+	Render     *render.Engine
+	Recompile  *recompile.Engine
+	CostWarden *costwarden.Engine
+	YouTube    *youtube.Engine
+	OutputDir  string
+	Reporter   telemetry.Reporter
 }
 
 // Engine orchestrates the seven-step wizard.
@@ -273,10 +273,17 @@ func (e *Engine) completeScript(ctx context.Context, rec store.WizardSessionReco
 		}
 		project.CostPlan = &plan.CostPlan
 		state.CostPlan = &plan.CostPlan
-	} else if e.projects != nil {
-		if err := e.projects.SaveProject(ctx, project); err != nil {
-			return Session{}, err
-		}
+	}
+	// The wizard owns the project it produces. Do not rely on CostWarden's
+	// optional persistence side effect: CostWarden can be configured without a
+	// ProjectStore, and in that valid setup step 4 used to report success only
+	// for step 5 to fail with project not found.
+	if e.projects == nil {
+		return Session{}, fmt.Errorf("project store unavailable")
+	}
+	project.UpdatedAt = time.Now().UTC()
+	if err := e.projects.SaveProject(ctx, project); err != nil {
+		return Session{}, err
 	}
 	rec.ProjectID = project.ID
 	rec.CurrentStep = StepAssets
@@ -298,7 +305,7 @@ func (e *Engine) completeAssets(ctx context.Context, rec store.WizardSessionReco
 		_, err := e.compliance.Check(ctx, compliance.CheckRequest{
 			AccountID: "wizard", StructureCardID: "wiz-card",
 			Fingerprint: []float64{0.5, 0.5},
-			ScriptText: scriptText,
+			ScriptText:  scriptText,
 			NonTemplate: []compliance.NonTemplateElement{{
 				Kind: compliance.KindFirstHandData, Content: "42%",
 			}},
