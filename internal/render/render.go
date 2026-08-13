@@ -43,6 +43,11 @@ var (
 	ErrOutputRejected = errors.New("render output failed validation")
 	// ErrRunNotFound is returned when a render run id is unknown.
 	ErrRunNotFound = errors.New("render run not found")
+	// ErrReusableArtifactUnavailable means an accepted recompile plan named a
+	// seg as reusable, but the cached bytes can no longer be read. The executor
+	// does not silently regenerate it because that would make the executed work
+	// disagree with the recorded plan.
+	ErrReusableArtifactUnavailable = errors.New("reusable render artifact is unavailable")
 )
 
 // Dimensions returns width and height for a resolution tier.

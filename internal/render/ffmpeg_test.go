@@ -29,6 +29,28 @@ func TestExecFFmpegRequiresVideo(t *testing.T) {
 	}
 }
 
+func TestExecFFmpegKeepsRepeatedVideoInputs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX shell script")
+	}
+	dir := t.TempDir()
+	videoPath := filepath.Join(dir, "shared.mp4")
+	if err := os.WriteFile(videoPath, []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "ffmpeg-ok")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nfor last; do :; done\nprintf rendered > \"$last\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := (render.ExecFFmpeg{Binary: binary}).Mux(t.Context(), filepath.Join(dir, "out.mp4"), []string{videoPath, videoPath}, render.MuxPlan{
+		Width: 320, Height: 180, FPS: 25,
+		ClipDurations: []time.Duration{time.Second, time.Second},
+	})
+	if err != nil {
+		t.Fatalf("repeated cached artifact must occupy both seg positions: %v", err)
+	}
+}
+
 func TestExecFFmpegBurnInRequiresSubtitleInput(t *testing.T) {
 	dir := t.TempDir()
 	videoPath := filepath.Join(dir, "input.mp4")

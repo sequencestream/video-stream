@@ -184,13 +184,19 @@ func TestArtifactTracesToSeg(t *testing.T) {
 
 func TestRunAcceptsAndReturnsRecompilePlan(t *testing.T) {
 	project := sampleProject(t)
+	eng := openEngine(t, render.Options{})
+	if _, err := eng.Run(t.Context(), render.RunRequest{
+		Project: project, Resolution: render.Resolution720p, RunID: "run-prime-plan-cache",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	plan := recompile.Plan{
 		ProjectID:       project.ID,
 		Invalidated:     []string{"hook"},
 		Reused:          []string{"body"},
 		CostSavedMicros: 42,
 	}
-	result, err := openEngine(t, render.Options{}).Run(t.Context(), render.RunRequest{
+	result, err := eng.Run(t.Context(), render.RunRequest{
 		Project: project, Resolution: render.Resolution720p, RunID: "run-recompile-plan",
 		RecompilePlan: &plan,
 	})
@@ -202,6 +208,80 @@ func TestRunAcceptsAndReturnsRecompilePlan(t *testing.T) {
 		len(result.RecompilePlan.Reused) != 1 || result.RecompilePlan.Reused[0] != "body" {
 		t.Fatalf("executor returned plan %+v, want %+v", result.RecompilePlan, plan)
 	}
+}
+
+func TestRecompilePlanReusesArtifactsAndGeneratesOnlyInvalidatedSegs(t *testing.T) {
+	outputDir := t.TempDir()
+	videos := &render.CountingVideoGenerator{Inner: render.StubVideoGenerator{OutputDir: outputDir}}
+	eng := openEngine(t, render.Options{OutputDir: outputDir, Video: videos})
+	before := sampleProject(t)
+
+	first, err := eng.Run(t.Context(), render.RunRequest{
+		Project: before, Resolution: render.Resolution720p, RunID: "run-before-edit",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if videos.Calls != len(before.Segs) {
+		t.Fatalf("initial video generations=%d want %d", videos.Calls, len(before.Segs))
+	}
+	beforeArtifacts := artifactsBySeg(first.SegArtifacts)
+
+	after := before
+	after.Segs = append([]model.Seg(nil), before.Segs...)
+	after.Segs[1].Text = "Survey now shows 81 percent"
+	after.Seal()
+	plan := recompile.Plan{
+		ProjectID: after.ID,
+		Reused:    []string{"hook"},
+		Invalidated: []string{
+			"body",
+		},
+	}
+	second, err := eng.Run(t.Context(), render.RunRequest{
+		Project: after, Resolution: render.Resolution720p, RunID: "run-after-edit",
+		RecompilePlan: &plan,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if videos.Calls != len(before.Segs)+1 {
+		t.Fatalf("video generations after edit=%d want %d (only invalidated body regenerated)", videos.Calls, len(before.Segs)+1)
+	}
+	afterArtifacts := artifactsBySeg(second.SegArtifacts)
+	if afterArtifacts["hook"].URI != beforeArtifacts["hook"].URI {
+		t.Fatalf("reused hook URI=%q want cached %q", afterArtifacts["hook"].URI, beforeArtifacts["hook"].URI)
+	}
+	if afterArtifacts["body"].RenderCacheKey == beforeArtifacts["body"].RenderCacheKey {
+		t.Fatalf("invalidated body kept old cache key %q", afterArtifacts["body"].RenderCacheKey)
+	}
+	if len(second.SharedContext) != len(after.Segs) {
+		t.Fatalf("shared context keys=%d want %d after edit", len(second.SharedContext), len(after.Segs))
+	}
+}
+
+func TestRecompilePlanRejectsMissingReusableArtifact(t *testing.T) {
+	project := sampleProject(t)
+	plan := recompile.Plan{
+		ProjectID:   project.ID,
+		Invalidated: []string{"hook"},
+		Reused:      []string{"body"},
+	}
+	_, err := openEngine(t, render.Options{}).Run(t.Context(), render.RunRequest{
+		Project: project, Resolution: render.Resolution720p, RunID: "run-missing-reuse",
+		RecompilePlan: &plan,
+	})
+	if !errors.Is(err, render.ErrReusableArtifactUnavailable) {
+		t.Fatalf("got %v, want ErrReusableArtifactUnavailable", err)
+	}
+}
+
+func artifactsBySeg(artifacts []store.RenderSegArtifact) map[string]store.RenderSegArtifact {
+	result := make(map[string]store.RenderSegArtifact, len(artifacts))
+	for _, artifact := range artifacts {
+		result[artifact.SegID] = artifact
+	}
+	return result
 }
 
 func TestRunRejectsRecompilePlanThatDoesNotPartitionProject(t *testing.T) {
