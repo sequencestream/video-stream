@@ -94,7 +94,7 @@ func (e *Engine) PlanWithID(ctx context.Context, runID string, previous, next mo
 
 	changed := diff(previous, next)
 
-	plan := Plan{ProjectID: next.ID}
+	plan := Plan{RunID: runID, ProjectID: next.ID}
 	if len(previous.Segs) > 0 {
 		if boundary, reason := detectBoundary(previous, next, prevOrder, nextOrder, changed.touched()); boundary != BoundaryNone {
 			plan.FullRerun = true

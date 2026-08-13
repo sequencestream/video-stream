@@ -219,6 +219,7 @@ func TestRecompileReportPublishesTheRatesAndTheVerdict(t *testing.T) {
 			ID: "run-" + strconv.Itoa(i), ProjectID: "p1",
 			PlannedAt: time.UnixMilli(int64(i + 1)),
 			TotalSegs: 10, InvalidatedSegs: 1, CostSavedMicros: 1000,
+			CacheHits: 9, RegeneratedSegs: 1, ElapsedMS: 50, ActualCostMicros: 25,
 		})
 	}
 	recordRuns(t, &deps, runs)
@@ -233,6 +234,9 @@ func TestRecompileReportPublishesTheRatesAndTheVerdict(t *testing.T) {
 	}
 	if got.CostSavedMicros != 20_000 {
 		t.Errorf("cost_saved_micros = %d, want 20000", got.CostSavedMicros)
+	}
+	if got.CacheHits != 180 || got.RegeneratedSegs != 20 || got.ElapsedMS != 1000 || got.ActualCostMicros != 500 {
+		t.Errorf("execution metrics = %+v", got)
 	}
 	if got.Verdict != recompile.VerdictViable {
 		t.Errorf("verdict = %q, want viable", got.Verdict)

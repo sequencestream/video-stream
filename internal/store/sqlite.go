@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS recompile_runs (
 	full_rerun        INTEGER NOT NULL DEFAULT 0,
 	boundary          TEXT NOT NULL DEFAULT '',
 	cost_saved_micros INTEGER NOT NULL DEFAULT 0,
+	cache_hits         INTEGER NOT NULL DEFAULT 0,
+	regenerated_segs   INTEGER NOT NULL DEFAULT 0,
+	elapsed_ms          INTEGER NOT NULL DEFAULT 0,
+	actual_cost_micros INTEGER NOT NULL DEFAULT 0,
 	CHECK (total_segs >= 0 AND invalidated_segs >= 0 AND invalidated_segs <= total_segs)
 );
 CREATE INDEX IF NOT EXISTS idx_recompile_runs_project ON recompile_runs(project_id, planned_at);
@@ -362,12 +366,20 @@ func applySQLiteMigrations(db *sql.DB) error {
 	}); err != nil {
 		return err
 	}
-	return applyColumnMigration(db, "003_render_bgm", "render_runs", []struct{ name, ddl string }{
+	if err := applyColumnMigration(db, "003_render_bgm", "render_runs", []struct{ name, ddl string }{
 		{"include_bgm", `ALTER TABLE render_runs ADD COLUMN include_bgm INTEGER NOT NULL DEFAULT 0`},
 		{"bgm_uri", `ALTER TABLE render_runs ADD COLUMN bgm_uri TEXT NOT NULL DEFAULT ''`},
 		{"bgm_bpm", `ALTER TABLE render_runs ADD COLUMN bgm_bpm REAL NOT NULL DEFAULT 0`},
 		{"bgm_beat_offset_ms", `ALTER TABLE render_runs ADD COLUMN bgm_beat_offset_ms INTEGER NOT NULL DEFAULT 0`},
 		{"bgm_gain_db", `ALTER TABLE render_runs ADD COLUMN bgm_gain_db REAL NOT NULL DEFAULT 0`},
+	}); err != nil {
+		return err
+	}
+	return applyColumnMigration(db, "004_recompile_execution_metrics", "recompile_runs", []struct{ name, ddl string }{
+		{"cache_hits", `ALTER TABLE recompile_runs ADD COLUMN cache_hits INTEGER NOT NULL DEFAULT 0`},
+		{"regenerated_segs", `ALTER TABLE recompile_runs ADD COLUMN regenerated_segs INTEGER NOT NULL DEFAULT 0`},
+		{"elapsed_ms", `ALTER TABLE recompile_runs ADD COLUMN elapsed_ms INTEGER NOT NULL DEFAULT 0`},
+		{"actual_cost_micros", `ALTER TABLE recompile_runs ADD COLUMN actual_cost_micros INTEGER NOT NULL DEFAULT 0`},
 	})
 }
 

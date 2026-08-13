@@ -124,6 +124,7 @@ func TestRecordRunRoundTripsEveryField(t *testing.T) {
 		FullRerun:       false,
 		Boundary:        "",
 		CostSavedMicros: 9_000_000,
+		CacheHits:       3, RegeneratedSegs: 2, ElapsedMS: 1250, ActualCostMicros: 750_000,
 	}
 	if err := s.RecordRun(ctx, want); err != nil {
 		t.Fatalf("RecordRun: %v", err)
@@ -138,6 +139,28 @@ func TestRecordRunRoundTripsEveryField(t *testing.T) {
 	}
 	if got[0] != want {
 		t.Fatalf("round trip changed the run:\n got %+v\nwant %+v", got[0], want)
+	}
+}
+
+func TestRecordRecompileExecutionUpdatesActualMetrics(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	if err := s.RecordRun(ctx, store.RecompileRun{ID: "run-actual", ProjectID: "p1", TotalSegs: 5, InvalidatedSegs: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordRecompileExecution(ctx, "run-actual", 3, 2, 987, 456); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.RecompileRuns(ctx, "p1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := runs[0]
+	if got.CacheHits != 3 || got.RegeneratedSegs != 2 || got.ElapsedMS != 987 || got.ActualCostMicros != 456 {
+		t.Fatalf("got %+v", got)
+	}
+	if err := s.RecordRecompileExecution(ctx, "missing", 0, 0, 0, 0); !errors.Is(err, store.ErrRecompileRunNotFound) {
+		t.Fatalf("got %v, want ErrRecompileRunNotFound", err)
 	}
 }
 
@@ -183,6 +206,20 @@ func TestRecordRunRejectsAnImpossibleInvalidationCount(t *testing.T) {
 	}
 	if len(runs) != 0 {
 		t.Fatalf("a rejected run was written anyway: %+v", runs)
+	}
+}
+
+func TestRecordRunRejectsNegativeExecutionMetrics(t *testing.T) {
+	s := openStore(t)
+	for _, run := range []store.RecompileRun{
+		{ID: "hits", ProjectID: "p", CacheHits: -1},
+		{ID: "generated", ProjectID: "p", RegeneratedSegs: -1},
+		{ID: "elapsed", ProjectID: "p", ElapsedMS: -1},
+		{ID: "cost", ProjectID: "p", ActualCostMicros: -1},
+	} {
+		if err := s.RecordRun(t.Context(), run); err == nil {
+			t.Fatalf("accepted %+v", run)
+		}
 	}
 }
 

@@ -367,6 +367,10 @@ type recompileReportResponse struct {
 	FullRerunRuns     int                        `json:"full_rerun_runs"`
 	FullRerunRate     float64                    `json:"full_rerun_rate"`
 	CostSavedMicros   int64                      `json:"cost_saved_micros"`
+	CacheHits         int                        `json:"cache_hits"`
+	RegeneratedSegs   int                        `json:"regenerated_segs"`
+	ElapsedMS         int64                      `json:"elapsed_ms"`
+	ActualCostMicros  int64                      `json:"actual_cost_micros"`
 	ByBoundary        map[recompile.Boundary]int `json:"by_boundary,omitempty"`
 	Verdict           recompile.Verdict          `json:"verdict"`
 	ScrapThresholdPct int                        `json:"scrap_threshold_percent"`
@@ -406,6 +410,10 @@ func (s *Server) handleRecompileReport(w http.ResponseWriter, r *http.Request) {
 		FullRerunRuns:     report.FullRerunRuns,
 		FullRerunRate:     report.FullRerunRate(),
 		CostSavedMicros:   report.CostSavedMicros,
+		CacheHits:         report.CacheHits,
+		RegeneratedSegs:   report.RegeneratedSegs,
+		ElapsedMS:         report.ElapsedMS,
+		ActualCostMicros:  report.ActualCostMicros,
 		ByBoundary:        report.ByBoundary,
 		Verdict:           report.Verdict(),
 		ScrapThresholdPct: recompile.ScrapThresholdPercent,

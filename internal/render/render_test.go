@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,17 @@ func openEngine(t *testing.T, opts render.Options) *render.Engine {
 	opts.Store = db
 	opts.Artifacts = db
 	return render.New(opts)
+}
+
+type receiptVideoGenerator struct {
+	inner render.VideoGenerator
+	cost  int64
+}
+
+func (g receiptVideoGenerator) Generate(ctx context.Context, in render.VideoGenInput) (render.GeneratedVideo, error) {
+	generated, err := g.inner.Generate(ctx, in)
+	generated.CostMicros = g.cost
+	return generated, err
 }
 
 func Test720And1080ShareSeedRef(t *testing.T) {
@@ -257,6 +269,97 @@ func TestRecompilePlanReusesArtifactsAndGeneratesOnlyInvalidatedSegs(t *testing.
 	}
 	if len(second.SharedContext) != len(after.Segs) {
 		t.Fatalf("shared context keys=%d want %d after edit", len(second.SharedContext), len(after.Segs))
+	}
+}
+
+func TestOneNonBoundaryEditExecutesOnlyInvalidatedSubtreeAndPersistsActuals(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.OpenSQLite(filepath.Join(dir, "e2e.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	out := filepath.Join(dir, "out")
+	videos := &render.CountingVideoGenerator{Inner: receiptVideoGenerator{
+		inner: render.StubVideoGenerator{OutputDir: out}, cost: 125,
+	}}
+	eng := render.New(render.Options{
+		Store: db, Artifacts: db, RecompileRuns: db, OutputDir: out,
+		FFmpeg: render.StubFFmpeg{}, Video: videos, Validator: render.StubOutputValidator{},
+	})
+	recompiler := recompile.New(recompile.Options{Cache: db, Runs: db})
+	before := sampleProject(t)
+	before.Segs = append(before.Segs, model.NewSeg("tail", "Closing line", 3000))
+	before.Segs[1].DependsOn = []string{"hook"}
+	before.Segs[2].DependsOn = []string{"body"}
+	before.Seal()
+	if _, err := eng.Run(t.Context(), render.RunRequest{
+		RunID: "prime", Project: before, Resolution: render.Resolution720p,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	after := before
+	after.Segs = append([]model.Seg(nil), before.Segs...)
+	after.Segs[1].Text = "Survey now shows 81 percent"
+	after.Seal()
+	plan, err := recompiler.PlanWithID(t.Context(), "edit-1", before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.FullRerun || !slices.Equal(plan.Reused, []string{"hook"}) ||
+		!slices.Equal(plan.Invalidated, []string{"body", "tail"}) {
+		t.Fatalf("plan=%+v", plan)
+	}
+	if _, err := eng.Run(t.Context(), render.RunRequest{
+		RunID: "edited", Project: after, Resolution: render.Resolution720p, RecompilePlan: &plan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if videos.Calls != len(before.Segs)+2 {
+		t.Fatalf("video generations=%d want %d", videos.Calls, len(before.Segs)+2)
+	}
+	runs, err := db.RecompileRuns(t.Context(), before.ID, 10)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs=%+v err=%v", runs, err)
+	}
+	got := runs[0]
+	if got.CacheHits != 1 || got.RegeneratedSegs != 2 || got.ActualCostMicros != 250 || got.ElapsedMS < 0 {
+		t.Fatalf("execution metrics=%+v", got)
+	}
+}
+
+func TestExecutorRechecksCachedDurationAfterPlanning(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.OpenSQLite(filepath.Join(dir, "race.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	out := filepath.Join(dir, "out")
+	eng := render.New(render.Options{Store: db, Artifacts: db, OutputDir: out,
+		FFmpeg: render.StubFFmpeg{}, Video: render.StubVideoGenerator{OutputDir: out}, Validator: render.StubOutputValidator{}})
+	project := sampleProject(t)
+	if _, err := eng.Run(t.Context(), render.RunRequest{RunID: "prime", Project: project, Resolution: render.Resolution720p}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := recompile.New(recompile.Options{Cache: db}).Plan(t.Context(), project, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, _ := project.Seg("body")
+	artifact, err := db.Artifact(t.Context(), seg.RenderCacheKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact.DurationMS = seg.DurationBudget.MaxMS + 1
+	if err := db.PutArtifact(t.Context(), artifact); err != nil {
+		t.Fatal(err)
+	}
+	_, err = eng.Run(t.Context(), render.RunRequest{RunID: "stale", Project: project,
+		Resolution: render.Resolution720p, RecompilePlan: &plan})
+	if !errors.Is(err, render.ErrReusableArtifactUnavailable) || !strings.Contains(err.Error(), "no longer satisfies budget") {
+		t.Fatalf("got %v", err)
 	}
 }
 

@@ -70,7 +70,7 @@ func openWizardEngine(t *testing.T) (*wizard.Engine, *store.SQLiteStore) {
 		}),
 		Hybrid:     hybrid.New(hybrid.Options{Store: db}),
 		Compliance: comp,
-		Render:     render.New(render.Options{Store: db, Artifacts: db, OutputDir: out, FFmpeg: render.StubFFmpeg{}, Video: render.StubVideoGenerator{OutputDir: out}, Validator: render.StubOutputValidator{}}),
+		Render:     render.New(render.Options{Store: db, Artifacts: db, RecompileRuns: db, OutputDir: out, FFmpeg: render.StubFFmpeg{}, Video: render.StubVideoGenerator{OutputDir: out}, Validator: render.StubOutputValidator{}}),
 		Recompile:  recompile.New(recompile.Options{Cache: db, Runs: db}),
 		// Deliberately leave CostWarden.Projects nil. The wizard, rather than an
 		// optional CostWarden side effect, must persist the project it produces.

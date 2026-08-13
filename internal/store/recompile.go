@@ -57,6 +57,13 @@ type RecompileRun struct {
 	// Boundary names the boundary that forced the rerun, empty when none did.
 	Boundary        string `json:"boundary,omitempty"`
 	CostSavedMicros int64  `json:"cost_saved_micros"`
+	// Execution fields are filled by the renderer after the accepted plan has
+	// completed. Keeping planned and actual counters on the same stable run id
+	// makes retries idempotent and exposes when execution diverges from intent.
+	CacheHits        int   `json:"cache_hits"`
+	RegeneratedSegs  int   `json:"regenerated_segs"`
+	ElapsedMS        int64 `json:"elapsed_ms"`
+	ActualCostMicros int64 `json:"actual_cost_micros"`
 }
 
 // ArtifactStore persists rendered artifacts by render cache key.
@@ -73,6 +80,9 @@ type ArtifactStore interface {
 type RecompileRunStore interface {
 	// RecordRun appends one outcome.
 	RecordRun(ctx context.Context, r RecompileRun) error
+	// RecordRecompileExecution completes an already planned run's actual
+	// measurements. It returns ErrRecompileRunNotFound for an unknown id.
+	RecordRecompileExecution(ctx context.Context, runID string, cacheHits, regeneratedSegs int, elapsedMS, actualCostMicros int64) error
 	// RecompileRuns returns runs newest first, capped at limit. An empty
 	// projectID means every project.
 	RecompileRuns(ctx context.Context, projectID string, limit int) ([]RecompileRun, error)
