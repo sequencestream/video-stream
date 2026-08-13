@@ -104,6 +104,9 @@ type Storage struct {
 	DataDir string `yaml:"data_dir"`
 	// OutputDir holds rendered artifacts handed back to the user.
 	OutputDir string `yaml:"output_dir"`
+	// MediaDir holds optional local source images/videos arranged as
+	// <project_id>/<seg_id>.<extension>.
+	MediaDir string `yaml:"media_dir"`
 }
 
 // Budget caps spend so a runaway pipeline cannot bill indefinitely. It is
@@ -188,7 +191,7 @@ func Default() Config {
 	return Config{
 		Server:  Server{Addr: ":8080"},
 		Sidecar: Sidecar{BaseURL: "http://127.0.0.1:8090", Timeout: 5 * time.Second},
-		Storage: Storage{DataDir: "./data", OutputDir: "./output"},
+		Storage: Storage{DataDir: "./data", OutputDir: "./output", MediaDir: "./media"},
 		Audio: Audio{
 			Provider: "edge", DefaultVoice: "zh-CN-XiaoxiaoNeural",
 			PythonBinary: "python3", FFmpegBinary: "ffmpeg",
@@ -252,6 +255,7 @@ func applyEnv(cfg *Config) {
 	setDuration(&cfg.Sidecar.Timeout, "VS_SIDECAR_TIMEOUT")
 	setString(&cfg.Storage.DataDir, "VS_DATA_DIR")
 	setString(&cfg.Storage.OutputDir, "VS_OUTPUT_DIR")
+	setString(&cfg.Storage.MediaDir, "VS_MEDIA_DIR")
 	setString(&cfg.Audio.Provider, "VS_TTS_PROVIDER")
 	setString(&cfg.Audio.DefaultVoice, "VS_TTS_VOICE")
 	setString(&cfg.Audio.PythonBinary, "VS_TTS_PYTHON_BINARY")

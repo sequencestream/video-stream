@@ -18,6 +18,7 @@ sidecar:
 storage:
   data_dir: "./data" # VS_DATA_DIR — holds video-stream.db
   output_dir: "./output" # VS_OUTPUT_DIR — holds rendered artifacts
+  media_dir: "./media" # VS_MEDIA_DIR — optional <project>/<seg>.jpg|png|mp4|mov sources
 
 audio:
   # edge is the production default; stub is only for offline development/tests.

@@ -161,6 +161,8 @@ curl -s -X POST localhost:8080/v1/hybrid/plan \
 
 `internal/render` 以 FFmpeg stage 化直出 MP4；720p 预览与 1080p 出片共享 prompt/seed/ref，高清阶段无 LLM。BGM 卡点仅定稿后可跑。
 
+本地视觉素材可按 `media/<project_id>/<seg_id>.jpg|png|mp4|mov` 放置（目录可用 `VS_MEDIA_DIR` 修改）。图片自动应用可复现 Ken Burns，视频自动循环、缩放和裁剪到 seg 时长；未提供素材的 seg 使用确定性 motion graphics，因此默认渲染路径也会产出真实 H.264 画面。
+
 音频默认由 Edge TTS 合成，使用服务端原始词边界生成时间线，并输出 48 kHz 单声道 PCM WAV。
 本地运行需安装 Python `edge-tts` 包与 FFmpeg；容器镜像已包含二者。离线开发可设置
 `VS_TTS_PROVIDER=stub`，但该模式不会产生可播放音频。
