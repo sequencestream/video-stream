@@ -12,6 +12,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/label"
 	"github.com/sequencestream/video-stream/internal/model"
+	"github.com/sequencestream/video-stream/internal/recompile"
 	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/telemetry"
@@ -178,6 +179,39 @@ func TestArtifactTracesToSeg(t *testing.T) {
 	traced := render.TraceSeg(result.SegArtifacts, "hook")
 	if len(traced) != 1 || traced[0].RenderCacheKey == "" {
 		t.Fatalf("got %+v", traced)
+	}
+}
+
+func TestRunAcceptsAndReturnsRecompilePlan(t *testing.T) {
+	project := sampleProject(t)
+	plan := recompile.Plan{
+		ProjectID:       project.ID,
+		Invalidated:     []string{"hook"},
+		Reused:          []string{"body"},
+		CostSavedMicros: 42,
+	}
+	result, err := openEngine(t, render.Options{}).Run(t.Context(), render.RunRequest{
+		Project: project, Resolution: render.Resolution720p, RunID: "run-recompile-plan",
+		RecompilePlan: &plan,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RecompilePlan == nil || result.RecompilePlan.ProjectID != project.ID ||
+		len(result.RecompilePlan.Invalidated) != 1 || result.RecompilePlan.Invalidated[0] != "hook" ||
+		len(result.RecompilePlan.Reused) != 1 || result.RecompilePlan.Reused[0] != "body" {
+		t.Fatalf("executor returned plan %+v, want %+v", result.RecompilePlan, plan)
+	}
+}
+
+func TestRunRejectsRecompilePlanThatDoesNotPartitionProject(t *testing.T) {
+	project := sampleProject(t)
+	plan := recompile.Plan{ProjectID: project.ID, Invalidated: []string{"hook"}}
+	_, err := openEngine(t, render.Options{}).Run(t.Context(), render.RunRequest{
+		Project: project, Resolution: render.Resolution720p, RecompilePlan: &plan,
+	})
+	if err == nil || !strings.Contains(err.Error(), "omits seg \"body\"") {
+		t.Fatalf("got %v, want omitted-seg plan error", err)
 	}
 }
 

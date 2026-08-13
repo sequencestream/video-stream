@@ -466,6 +466,7 @@ func (e *Engine) completePreview(ctx context.Context, rec store.WizardSessionRec
 		return Session{}, err
 	}
 	previous := project
+	var recompilePlan *recompile.Plan
 	if req.EditSegID != "" && req.EditText != "" {
 		for i := range project.Segs {
 			if project.Segs[i].SegID == req.EditSegID {
@@ -478,11 +479,7 @@ func (e *Engine) completePreview(ctx context.Context, rec store.WizardSessionRec
 			if err != nil {
 				return Session{}, err
 			}
-			state, _ := decodeState(rec.StateJSON)
-			state.InvalidatedSegs = len(plan.Invalidated)
-			state.TotalSegs = len(project.Segs)
-			raw, _ := encodeState(state)
-			rec.StateJSON = raw
+			recompilePlan = &plan
 		}
 	}
 	if e.render == nil {
@@ -491,6 +488,7 @@ func (e *Engine) completePreview(ctx context.Context, rec store.WizardSessionRec
 	runID := "wiz-preview-" + rec.ID
 	result, err := e.render.Run(ctx, render.RunRequest{
 		RunID: runID, Project: project, Resolution: render.Resolution720p,
+		RecompilePlan: recompilePlan,
 	})
 	if err != nil {
 		return Session{}, err
@@ -505,6 +503,10 @@ func (e *Engine) completePreview(ctx context.Context, rec store.WizardSessionRec
 		return Session{}, ErrBudgetExceeded
 	}
 	state, _ := decodeState(rec.StateJSON)
+	if result.RecompilePlan != nil {
+		state.InvalidatedSegs = len(result.RecompilePlan.Invalidated)
+		state.TotalSegs = result.RecompilePlan.TotalSegs()
+	}
 	state.PreviewRunID = result.RunID
 	rec.CurrentStep = StepDeliver
 	return e.save(ctx, rec, state)

@@ -12,6 +12,7 @@ import (
 	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/label"
 	"github.com/sequencestream/video-stream/internal/model"
+	"github.com/sequencestream/video-stream/internal/recompile"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 )
@@ -27,6 +28,9 @@ type RunRequest struct {
 	ResumeFrom   string
 	Platform     string
 	SubtitleMode audio.SubtitleMode
+	// RecompilePlan is the planner's exact decision for an edited preview.
+	// Nil means this is a normal full render rather than an incremental edit.
+	RecompilePlan *recompile.Plan
 }
 
 // RunResult is the outcome of a pipeline execution.
@@ -38,6 +42,7 @@ type RunResult struct {
 	CompletedStages []string                  `json:"completed_stages"`
 	SharedContext   []SharedVisual            `json:"shared_context"`
 	SegArtifacts    []store.RenderSegArtifact `json:"seg_artifacts"`
+	RecompilePlan   *recompile.Plan           `json:"recompile_plan,omitempty"`
 }
 
 // Options configures the Engine.
@@ -123,6 +128,11 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err := req.Resolution.Validate(); err != nil {
 		return RunResult{}, err
 	}
+	if req.RecompilePlan != nil {
+		if err := req.RecompilePlan.ValidateFor(req.Project); err != nil {
+			return RunResult{}, fmt.Errorf("invalid recompile plan: %w", err)
+		}
+	}
 	if req.Platform == "" {
 		req.Platform = "youtube"
 	}
@@ -182,7 +192,8 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			completed = append(completed, StageBGMBeat)
 		}
 		return RunResult{RunID: run.ID, ProjectID: run.ProjectID, Resolution: req.Resolution,
-			OutputURI: run.OutputURI, CompletedStages: completed, SharedContext: shared, SegArtifacts: arts}, nil
+			OutputURI: run.OutputURI, CompletedStages: completed, SharedContext: shared, SegArtifacts: arts,
+			RecompilePlan: req.RecompilePlan}, nil
 	}
 
 	startIdx := 0
@@ -312,7 +323,7 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	return RunResult{
 		RunID: req.RunID, ProjectID: req.Project.ID, Resolution: req.Resolution,
 		OutputURI: outPath, CompletedStages: completed,
-		SharedContext: shared, SegArtifacts: segArts,
+		SharedContext: shared, SegArtifacts: segArts, RecompilePlan: req.RecompilePlan,
 	}, nil
 }
 
