@@ -46,6 +46,9 @@ func openEngine(t *testing.T, opts render.Options) *render.Engine {
 	if opts.Video == nil {
 		opts.Video = render.StubVideoGenerator{OutputDir: opts.OutputDir}
 	}
+	if opts.Validator == nil {
+		opts.Validator = render.StubOutputValidator{}
+	}
 	opts.Store = db
 	opts.Artifacts = db
 	return render.New(opts)
@@ -277,5 +280,35 @@ func TestRenderRejectsBrokenLabelReadback(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, render.ErrLabelRejected) {
 		t.Fatalf("got %v, want ErrLabelRejected", err)
+	}
+}
+
+type rejectingOutputValidator struct{}
+
+func (rejectingOutputValidator) Validate(context.Context, string, render.OutputSpec) error {
+	return errors.New("audio stream is corrupt")
+}
+
+func TestRenderRejectsInvalidOutputBeforeDelivery(t *testing.T) {
+	outputDir := t.TempDir()
+	eng := openEngine(t, render.Options{OutputDir: outputDir, Validator: rejectingOutputValidator{}})
+	project := sampleProject(t)
+	runID := "run-output-fail"
+	_, err := eng.Run(t.Context(), render.RunRequest{
+		Project: project, Resolution: render.Resolution720p, RunID: runID,
+	})
+	if !errors.Is(err, render.ErrOutputRejected) {
+		t.Fatalf("got %v, want ErrOutputRejected", err)
+	}
+	run, _, getErr := eng.GetRun(t.Context(), runID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if run.Status != "failed" || run.OutputURI != "" || !strings.Contains(run.Error, "audio stream is corrupt") {
+		t.Fatalf("rejected run was exposed as deliverable: %+v", run)
+	}
+	outPath := filepath.Join(outputDir, project.ID, "720p.mp4")
+	if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected output remains at %s: %v", outPath, statErr)
 	}
 }

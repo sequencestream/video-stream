@@ -159,7 +159,7 @@ curl -s -X POST localhost:8080/v1/hybrid/plan \
 
 ## 渲染管线（720p / 1080p）
 
-`internal/render` 以 FFmpeg stage 化直出 MP4；720p 预览与 1080p 出片共享 prompt/seed/ref，高清阶段无 LLM。BGM 卡点与旁链混音仅定稿后可跑，通过请求 `bgm` 参数或 `media/<project_id>/bgm.*` 提供本地音乐。
+`internal/render` 以 FFmpeg stage 化直出 MP4；720p 预览与 1080p 出片共享 prompt/seed/ref，高清阶段无 LLM。BGM 卡点与旁链混音仅定稿后可跑，通过请求 `bgm` 参数或 `media/<project_id>/bgm.*` 提供本地音乐。Mux 后使用 FFprobe 校验 MP4 容器、目标分辨率、时长和音轨，并用 FFmpeg 完整解码音视频；校验失败的文件不会交付。
 
 本地视觉素材可按 `media/<project_id>/<seg_id>.jpg|png|mp4|mov` 放置（目录可用 `VS_MEDIA_DIR` 修改）。图片自动应用可复现 Ken Burns，视频自动循环、缩放和裁剪到 seg 时长；未提供素材的 seg 使用确定性 motion graphics，因此默认渲染路径也会产出真实 H.264 画面。
 

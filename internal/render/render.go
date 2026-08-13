@@ -15,12 +15,12 @@ const (
 
 // Stage names follow the MVP pipeline order.
 const (
-	StageVisuals    = "visuals"
-	StageAudio      = "audio"
-	StageSubtitles  = "subtitles"
-	StageLoudness   = "loudness"
-	StageMux        = "mux"
-	StageBGMBeat    = "bgm_beat"
+	StageVisuals   = "visuals"
+	StageAudio     = "audio"
+	StageSubtitles = "subtitles"
+	StageLoudness  = "loudness"
+	StageMux       = "mux"
+	StageBGMBeat   = "bgm_beat"
 )
 
 // StageOrder is the default pipeline. BGM beat is appended only when finalized.
@@ -39,6 +39,8 @@ var (
 	ErrPreviewRequired = errors.New("run a 720p preview before 1080p delivery")
 	// ErrLabelRejected means compliance label readback failed after mux.
 	ErrLabelRejected = errors.New("compliance label injection or readback failed")
+	// ErrOutputRejected means the muxed file failed delivery validation.
+	ErrOutputRejected = errors.New("render output failed validation")
 	// ErrRunNotFound is returned when a render run id is unknown.
 	ErrRunNotFound = errors.New("render run not found")
 )
