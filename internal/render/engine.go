@@ -341,25 +341,47 @@ func (e *Engine) resolveSharedContext(ctx context.Context, req RunRequest) ([]Sh
 	if err != nil {
 		return nil, err
 	}
-	if len(stored) > 0 {
-		return stored, nil
+	base := BuildSharedContext(req.Project)
+	storedByKey := make(map[string]SharedVisual, len(stored))
+	for _, visual := range stored {
+		storedByKey[visual.RenderCacheKey] = visual
+	}
+
+	resolved := make([]SharedVisual, len(base))
+	missing := make([]SharedVisual, 0, len(base))
+	missingIndexes := make([]int, 0, len(base))
+	for i, visual := range base {
+		if cached, ok := storedByKey[visual.RenderCacheKey]; ok {
+			resolved[i] = cached
+			continue
+		}
+		missing = append(missing, visual)
+		missingIndexes = append(missingIndexes, i)
+	}
+	if len(missing) == 0 {
+		return resolved, nil
 	}
 	if req.Resolution == Resolution1080p {
 		return nil, ErrPreviewRequired
 	}
 
-	base := BuildSharedContext(req.Project)
-	enriched, err := e.prompts.Enrich(ctx, req.Project, base)
+	enriched, err := e.prompts.Enrich(ctx, req.Project, missing)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.saveSharedContext(ctx, req.Project.ID, enriched); err != nil {
+	if len(enriched) != len(missing) {
+		return nil, fmt.Errorf("prompt generator returned %d shared contexts for %d missing keys", len(enriched), len(missing))
+	}
+	for i, visual := range enriched {
+		resolved[missingIndexes[i]] = visual
+	}
+	if err := e.saveSharedContext(ctx, req.Project.ID, resolved); err != nil {
 		return nil, err
 	}
 	_ = telemetry.Report(ctx, e.reporter, "render.llm_prompts", map[string]any{
-		"project_id": req.Project.ID, "keys": len(enriched),
+		"project_id": req.Project.ID, "keys": len(missing),
 	})
-	return enriched, nil
+	return resolved, nil
 }
 
 func (e *Engine) priorStageFiles(ctx context.Context, req RunRequest, stages []string, startIdx int) ([]string, error) {
@@ -463,23 +485,39 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 	for _, v := range shared {
 		byKey[v.RenderCacheKey] = v
 	}
+	reused := make(map[string]struct{})
+	if req.RecompilePlan != nil {
+		for _, segID := range req.RecompilePlan.Reused {
+			reused[segID] = struct{}{}
+		}
+	}
 	var files []string
 	for _, s := range req.Project.Segs {
 		key := s.RenderCacheKey
 		if key == "" {
 			key = model.ComputeRenderCacheKey(s, req.Project.RenderProfile)
 		}
-		vis, ok := byKey[key]
-		if !ok {
-			return nil, fmt.Errorf("missing shared context for %s", key)
-		}
-		uri, err := e.video.Generate(ctx, VideoGenInput{
-			Resolution: req.Resolution, ProjectID: req.Project.ID, SegID: s.SegID,
-			Text: s.Text, DurationMS: s.DurationBudget.TargetMS(), RenderCacheKey: key,
-			Prompt: vis.Prompt, Seed: vis.Seed, RefURI: vis.RefURI,
-		})
-		if err != nil {
-			return nil, err
+		var uri string
+		if _, ok := reused[s.SegID]; ok {
+			var err error
+			uri, err = e.reusableArtifactURI(ctx, s.SegID, key)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			vis, ok := byKey[key]
+			if !ok {
+				return nil, fmt.Errorf("missing shared context for %s", key)
+			}
+			var err error
+			uri, err = e.video.Generate(ctx, VideoGenInput{
+				Resolution: req.Resolution, ProjectID: req.Project.ID, SegID: s.SegID,
+				Text: s.Text, DurationMS: s.DurationBudget.TargetMS(), RenderCacheKey: key,
+				Prompt: vis.Prompt, Seed: vis.Seed, RefURI: vis.RefURI,
+			})
+			if err != nil {
+				return nil, err
+			}
 		}
 		files = append(files, uri)
 		rec := store.RenderSegArtifact{
@@ -489,15 +527,39 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 		if err := e.store.PutRenderSegArtifact(ctx, rec); err != nil {
 			return nil, err
 		}
-		if e.artifacts != nil {
-			_ = e.artifacts.PutArtifact(ctx, store.Artifact{
+		if _, ok := reused[s.SegID]; !ok && e.artifacts != nil {
+			if err := e.artifacts.PutArtifact(ctx, store.Artifact{
 				RenderCacheKey: key,
 				DurationMS:     s.DurationBudget.TargetMS(),
 				URI:            uri,
-			})
+			}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return files, nil
+}
+
+func (e *Engine) reusableArtifactURI(ctx context.Context, segID, key string) (string, error) {
+	if e.artifacts == nil {
+		return "", fmt.Errorf("%w for seg %s: artifact store is not configured", ErrReusableArtifactUnavailable, segID)
+	}
+	artifact, err := e.artifacts.Artifact(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("%w for seg %s (%s): %v", ErrReusableArtifactUnavailable, segID, key, err)
+	}
+	uri := strings.TrimSpace(artifact.URI)
+	if uri == "" {
+		return "", fmt.Errorf("%w for seg %s (%s): URI is empty", ErrReusableArtifactUnavailable, segID, key)
+	}
+	info, err := os.Stat(uri)
+	if err != nil {
+		return "", fmt.Errorf("%w for seg %s (%s): %v", ErrReusableArtifactUnavailable, segID, key, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%w for seg %s (%s): URI is not a regular file", ErrReusableArtifactUnavailable, segID, key)
+	}
+	return uri, nil
 }
 
 func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.RenderRunRecord, error) {

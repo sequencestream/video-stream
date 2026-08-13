@@ -399,6 +399,8 @@ webui/               Next.js 7 步向导空壳（源码）
 
 数据模型方面明确不做：编辑标签求值（`filler` / `silence` 在纯 TTS 通路下无输入可处理）、可视化时间轴编辑器、`/v1/projects` HTTP 入口、数据库 DDL 迁移框架。理由见 [`doc/arch/data-model.md`](doc/arch/data-model.md) 的「明确不做」。
 
-增量重编译方面明确不做：真的去执行渲染（引擎只产出计划）、自适应阈值、边界的可配置化、产物垃圾回收。理由见 [`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md) 的「明确不做」。
+增量重编译执行器会直接复用计划中的未失效 seg artifact，仅为 invalidated seg 调用视频生成器。
+仍明确不做：自适应阈值、边界的可配置化、产物垃圾回收。理由见
+[`doc/arch/incremental-recompile.md`](doc/arch/incremental-recompile.md) 的「明确不做」。
 
 竞品雷达方面明确不做：全网热点爬虫、全局最佳发布时间预测、评论区自动回复、评论正文持久化、MVP 内置平台 scraper。理由见 [`doc/arch/radar.md`](doc/arch/radar.md) 的「明确不做」。

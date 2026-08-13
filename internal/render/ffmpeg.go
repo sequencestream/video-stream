@@ -158,16 +158,11 @@ type ffmpegInputs struct {
 
 func classifyFFmpegInputs(stageFiles []string) (ffmpegInputs, error) {
 	var result ffmpegInputs
-	seen := make(map[string]struct{}, len(stageFiles))
 	for _, path := range stageFiles {
 		path = strings.TrimSpace(path)
 		if path == "" {
 			return ffmpegInputs{}, errors.New("ffmpeg input path is empty")
 		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
 		info, err := os.Stat(path)
 		if err != nil {
 			return ffmpegInputs{}, fmt.Errorf("stat ffmpeg input %s: %w", path, err)

@@ -28,7 +28,7 @@
 ### 3. 让增量重编译真正驱动渲染
 
 - [x] 将 `recompile.Plan` 的结果传入渲染执行器。
-- [ ] 未失效 seg 直接复用 artifact，只重新生成 invalidated seg。
+- [x] 未失效 seg 直接复用 artifact，只重新生成 invalidated seg。
 - [ ] 复用前同时检查 `render_cache_key` 和实际时长是否落在 `duration_budget` 内。
 - [ ] 正确处理全量重跑的六条边界。
 - [ ] 持久化缓存命中数、重生成数、真实耗时、实际成本和节省成本。
