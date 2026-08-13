@@ -31,6 +31,13 @@ credential chain，不落盘明文。
 | douyin | -16 ±0.5 | 18 | burn_in |
 | bilibili | -14 ±0.5 | 36 | soft |
 
+## 响度测量与归一化
+
+真实音频使用 FFmpeg `loudnorm`（EBU R128）双遍处理：首遍测量 integrated LUFS、true peak、
+LRA 和 threshold，第二遍使用测量值归一化到平台目标（true peak 上限 -1.5 dBTP），随后再次
+测量输出。只有读回值处于平台容差内才原子发布 `mix.wav`；纯静音、测量输出无效、FFmpeg
+失败或读回超差均终止音频/渲染流程。stub provider 保留确定性伪测量，仅用于离线单元测试。
+
 字幕阶段统一输出有效的 `subs.vtt`。`soft` 模式在最终 MP4 中封装为 `mov_text` 字幕轨；
 `burn_in` 模式使用 FFmpeg `subtitles`/libass 滤镜烧入最终画面，不再保留独立字幕轨。
 运行环境必须提供 libass 字幕滤镜和覆盖目标语言的字体；官方镜像安装 Noto CJK 字体。

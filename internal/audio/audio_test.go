@@ -70,6 +70,13 @@ func TestNormalizeLUFSWithinTolerance(t *testing.T) {
 	}
 }
 
+func TestNormalizeLUFSReturnsRequiredGainOutsideTolerance(t *testing.T) {
+	gain, ok := NormalizeLUFS(-24, -14, 0.5)
+	if ok || gain != 10 {
+		t.Fatalf("gain=%v ok=%v", gain, ok)
+	}
+}
+
 func TestEngineSynthesizeSoftAndBurnIn(t *testing.T) {
 	dir := t.TempDir()
 	p := model.NewProject("p1", "t", testNow())
