@@ -8,12 +8,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // FFmpeg muxes staged outputs into the final MP4.
 type FFmpeg interface {
-	Mux(ctx context.Context, outputPath string, stageFiles []string) error
+	Mux(ctx context.Context, outputPath string, stageFiles []string, plan MuxPlan) error
+}
+
+// MuxPlan describes the common video timeline produced by the mux stage.
+// ClipDurations follows the video input order; supplying it lets the muxer add
+// transitions without shortening the narration timeline.
+type MuxPlan struct {
+	Width              int
+	Height             int
+	FPS                int
+	ClipDurations      []time.Duration
+	TransitionDuration time.Duration
 }
 
 // ExecFFmpeg invokes the local ffmpeg binary. Binary defaults to "ffmpeg" and
@@ -29,7 +42,7 @@ type ExecFFmpeg struct {
 // Mux validates the staged artifacts, invokes ffmpeg, and atomically publishes
 // the completed MP4. A failed or cancelled process never leaves a partial file
 // at outputPath.
-func (f ExecFFmpeg) Mux(ctx context.Context, outputPath string, stageFiles []string) error {
+func (f ExecFFmpeg) Mux(ctx context.Context, outputPath string, stageFiles []string, plan MuxPlan) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -42,6 +55,9 @@ func (f ExecFFmpeg) Mux(ctx context.Context, outputPath string, stageFiles []str
 	}
 	if strings.TrimSpace(outputPath) == "" {
 		return errors.New("ffmpeg output path is required")
+	}
+	if err := plan.validate(len(inputs.videos)); err != nil {
+		return err
 	}
 
 	outDir := filepath.Dir(outputPath)
@@ -59,7 +75,7 @@ func (f ExecFFmpeg) Mux(ctx context.Context, outputPath string, stageFiles []str
 	}
 	defer os.Remove(tmpPath)
 
-	args := buildFFmpegArgs(inputs, tmpPath)
+	args := buildFFmpegArgs(inputs, plan, tmpPath)
 	binary := strings.TrimSpace(f.Binary)
 	if binary == "" {
 		binary = "ffmpeg"
@@ -90,6 +106,34 @@ func (f ExecFFmpeg) Mux(ctx context.Context, outputPath string, stageFiles []str
 	}
 	if err := os.Rename(tmpPath, outputPath); err != nil {
 		return fmt.Errorf("publish ffmpeg output: %w", err)
+	}
+	return nil
+}
+
+func (p MuxPlan) validate(videoCount int) error {
+	if p.Width <= 0 || p.Height <= 0 {
+		return errors.New("ffmpeg mux width and height must be positive")
+	}
+	if p.FPS <= 0 {
+		return errors.New("ffmpeg mux fps must be positive")
+	}
+	if len(p.ClipDurations) != videoCount {
+		return fmt.Errorf("ffmpeg mux has %d video inputs but %d clip durations", videoCount, len(p.ClipDurations))
+	}
+	for i, duration := range p.ClipDurations {
+		if duration <= 0 {
+			return fmt.Errorf("ffmpeg mux clip %d duration must be positive", i)
+		}
+	}
+	if p.TransitionDuration < 0 {
+		return errors.New("ffmpeg mux transition duration must not be negative")
+	}
+	if p.TransitionDuration > 0 {
+		for i, duration := range p.ClipDurations {
+			if duration <= p.TransitionDuration {
+				return fmt.Errorf("ffmpeg mux clip %d duration %s must exceed transition duration %s", i, duration, p.TransitionDuration)
+			}
+		}
 	}
 	return nil
 }
@@ -134,7 +178,7 @@ func classifyFFmpegInputs(stageFiles []string) (ffmpegInputs, error) {
 	return result, nil
 }
 
-func buildFFmpegArgs(inputs ffmpegInputs, outputPath string) []string {
+func buildFFmpegArgs(inputs ffmpegInputs, plan MuxPlan, outputPath string) []string {
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y"}
 	for _, path := range inputs.videos {
 		args = append(args, "-i", path)
@@ -153,16 +197,8 @@ func buildFFmpegArgs(inputs ffmpegInputs, outputPath string) []string {
 		args = append(args, "-i", inputs.subtitle)
 	}
 
-	if len(inputs.videos) == 1 {
-		args = append(args, "-map", "0:v:0")
-	} else {
-		var filter strings.Builder
-		for i := range inputs.videos {
-			fmt.Fprintf(&filter, "[%d:v:0]", i)
-		}
-		fmt.Fprintf(&filter, "concat=n=%d:v=1:a=0[vout]", len(inputs.videos))
-		args = append(args, "-filter_complex", filter.String(), "-map", "[vout]")
-	}
+	filter := buildVideoFilter(len(inputs.videos), plan)
+	args = append(args, "-filter_complex", filter, "-map", "[vout]")
 	if audioIndex >= 0 {
 		args = append(args, "-map", fmt.Sprintf("%d:a:0", audioIndex), "-c:a", "aac", "-b:a", "192k")
 	}
@@ -171,19 +207,69 @@ func buildFFmpegArgs(inputs ffmpegInputs, outputPath string) []string {
 	}
 	args = append(args,
 		"-c:v", "libx264", "-preset", "medium", "-crf", "18",
-		"-pix_fmt", "yuv420p", "-movflags", "+faststart",
+		"-pix_fmt", "yuv420p", "-r", strconv.Itoa(plan.FPS), "-movflags", "+faststart",
 	)
-	if audioIndex >= 0 {
-		args = append(args, "-shortest")
+	timelineDuration := time.Duration(0)
+	for _, duration := range plan.ClipDurations {
+		timelineDuration += duration
 	}
+	args = append(args, "-t", formatFFmpegDuration(timelineDuration))
 	return append(args, outputPath)
+}
+
+func buildVideoFilter(videoCount int, plan MuxPlan) string {
+	var filter strings.Builder
+	transitionSeconds := formatFFmpegDuration(plan.TransitionDuration)
+	for i := 0; i < videoCount; i++ {
+		if i > 0 {
+			filter.WriteByte(';')
+		}
+		fmt.Fprintf(&filter,
+			"[%d:v:0]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,fps=%d,setsar=1,settb=AVTB,setpts=PTS-STARTPTS,trim=duration=%s",
+			i, plan.Width, plan.Height, plan.Width, plan.Height, plan.FPS, formatFFmpegDuration(plan.ClipDurations[i]))
+		if plan.TransitionDuration > 0 && i < videoCount-1 {
+			fmt.Fprintf(&filter, ",tpad=stop_mode=clone:stop_duration=%s", transitionSeconds)
+		}
+		fmt.Fprintf(&filter, "[v%d]", i)
+	}
+
+	if videoCount == 1 {
+		filter.WriteString(";[v0]null[vout]")
+		return filter.String()
+	}
+	if plan.TransitionDuration == 0 {
+		filter.WriteByte(';')
+		for i := 0; i < videoCount; i++ {
+			fmt.Fprintf(&filter, "[v%d]", i)
+		}
+		fmt.Fprintf(&filter, "concat=n=%d:v=1:a=0[vout]", videoCount)
+		return filter.String()
+	}
+
+	offset := time.Duration(0)
+	previous := "v0"
+	for i := 1; i < videoCount; i++ {
+		offset += plan.ClipDurations[i-1]
+		out := fmt.Sprintf("vx%d", i)
+		if i == videoCount-1 {
+			out = "vout"
+		}
+		fmt.Fprintf(&filter, ";[%s][v%d]xfade=transition=fade:duration=%s:offset=%s[%s]",
+			previous, i, transitionSeconds, formatFFmpegDuration(offset), out)
+		previous = out
+	}
+	return filter.String()
+}
+
+func formatFFmpegDuration(duration time.Duration) string {
+	return strconv.FormatFloat(duration.Seconds(), 'f', 6, 64)
 }
 
 // StubFFmpeg writes a placeholder MP4 marker file. Tests that exercise the
 // pipeline without media fixtures must opt into this implementation explicitly.
 type StubFFmpeg struct{}
 
-func (StubFFmpeg) Mux(_ context.Context, outputPath string, stageFiles []string) error {
+func (StubFFmpeg) Mux(_ context.Context, outputPath string, stageFiles []string, _ MuxPlan) error {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return err
 	}
