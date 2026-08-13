@@ -123,9 +123,6 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 		return SynthesizeResult{}, err
 	}
 
-	// Real LUFS measurement is a later pipeline item. Preserve a real PCM mix;
-	// the old deterministic normalization fixture is only meaningful for the
-	// explicit StubTTS test provider.
 	measured, gain := spec.TargetLUFS, 0.0
 	if segmentsAreStub(segments) {
 		measured = MeasureStub(audioPath, spec.TargetLUFS)
@@ -136,6 +133,17 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 			}
 			measured = spec.TargetLUFS
 		}
+	} else {
+		loudness, err := NormalizeFileLUFS(ctx, e.ffmpegBinary, audioPath, audioPath, spec.TargetLUFS, spec.LUFSTolerance)
+		if err != nil {
+			return SynthesizeResult{}, err
+		}
+		measured, gain = loudness.OutputLUFS, loudness.GainDB
+		_ = telemetry.Report(ctx, e.reporter, "audio.loudness_normalized", map[string]any{
+			"project_id": req.Project.ID, "platform": spec.Platform,
+			"input_lufs": loudness.InputLUFS, "output_lufs": loudness.OutputLUFS,
+			"target_lufs": spec.TargetLUFS, "gain_db": loudness.GainDB,
+		})
 	}
 
 	_ = telemetry.Report(ctx, e.reporter, "audio.synthesized", map[string]any{
