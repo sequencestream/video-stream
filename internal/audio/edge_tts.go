@@ -39,19 +39,41 @@ type edgeWordBoundary struct {
 	EndMS   int64  `json:"end_ms"`
 }
 
-func (e EdgeTTS) Synthesize(ctx context.Context, seg model.Seg, voice string) (SegResult, error) {
-	if err := ctx.Err(); err != nil {
-		return SegResult{}, err
+// RawDurationMS synthesizes text once and reports its unstretched duration.
+//
+// Synthesize deliberately time-stretches its output into the seg's budget and
+// fails when that would exceed ±MaxStretchPercent, which makes it useless for
+// deciding what the budget should be in the first place. This is the call that
+// answers that question, and it is why intake can measure a script before any
+// budget exists.
+func (e EdgeTTS) RawDurationMS(ctx context.Context, text, voice string) (int64, error) {
+	workDir, cleanup, err := e.synthesizeRaw(ctx, text, voice)
+	if err != nil {
+		return 0, err
 	}
-	if strings.TrimSpace(seg.Text) == "" {
-		return SegResult{}, errors.New("edge-tts text must not be empty")
+	defer cleanup()
+	return wavDurationMS(filepath.Join(workDir, rawWAVName))
+}
+
+// rawWAVName is the unstretched PCM conversion inside a synthesis work dir.
+const rawWAVName = "speech-raw.wav"
+
+// synthesizeRaw runs edge-tts and converts its MP3 to unstretched PCM. The
+// caller owns the returned work directory until it calls cleanup.
+func (e EdgeTTS) synthesizeRaw(ctx context.Context, text, voice string) (string, func(), error) {
+	noop := func() {}
+	if err := ctx.Err(); err != nil {
+		return "", noop, err
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", noop, errors.New("edge-tts text must not be empty")
 	}
 	voice = strings.TrimSpace(voice)
 	if voice == "" {
 		voice = strings.TrimSpace(e.DefaultVoice)
 	}
 	if voice == "" {
-		return SegResult{}, errors.New("edge-tts voice is required")
+		return "", noop, errors.New("edge-tts voice is required")
 	}
 
 	base := e.OutputDir
@@ -60,9 +82,9 @@ func (e EdgeTTS) Synthesize(ctx context.Context, seg model.Seg, voice string) (S
 	}
 	workDir, err := os.MkdirTemp(base, ".edge-tts-*")
 	if err != nil {
-		return SegResult{}, fmt.Errorf("create edge-tts work directory: %w", err)
+		return "", noop, fmt.Errorf("create edge-tts work directory: %w", err)
 	}
-	defer os.RemoveAll(workDir)
+	cleanup := func() { os.RemoveAll(workDir) }
 
 	mp3Path := filepath.Join(workDir, "speech.mp3")
 	timingPath := filepath.Join(workDir, "words.json")
@@ -76,14 +98,34 @@ func (e EdgeTTS) Synthesize(ctx context.Context, seg model.Seg, voice string) (S
 	}
 	cmd := exec.CommandContext(ctx, python, "-c", script,
 		"--voice", voice, "--media", mp3Path, "--timings", timingPath)
-	cmd.Stdin = strings.NewReader(seg.Text)
+	cmd.Stdin = strings.NewReader(text)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return SegResult{}, commandError(ctx, "edge-tts", err, stderr.String())
+		cleanup()
+		return "", noop, commandError(ctx, "edge-tts", err, stderr.String())
 	}
 
-	timingData, err := os.ReadFile(timingPath)
+	if err := convertToPCM(ctx, e.FFmpegBinary, mp3Path, filepath.Join(workDir, rawWAVName), 1); err != nil {
+		cleanup()
+		return "", noop, err
+	}
+	return workDir, cleanup, nil
+}
+
+func (e EdgeTTS) Synthesize(ctx context.Context, seg model.Seg, voice string) (SegResult, error) {
+	workDir, cleanup, err := e.synthesizeRaw(ctx, seg.Text, voice)
+	if err != nil {
+		return SegResult{}, err
+	}
+	defer cleanup()
+
+	base := e.OutputDir
+	if strings.TrimSpace(base) == "" {
+		base = os.TempDir()
+	}
+
+	timingData, err := os.ReadFile(filepath.Join(workDir, "words.json"))
 	if err != nil {
 		return SegResult{}, fmt.Errorf("read edge-tts word timings: %w", err)
 	}
@@ -95,10 +137,7 @@ func (e EdgeTTS) Synthesize(ctx context.Context, seg model.Seg, voice string) (S
 		return SegResult{}, err
 	}
 
-	rawWAV := filepath.Join(workDir, "speech-raw.wav")
-	if err := convertToPCM(ctx, e.FFmpegBinary, mp3Path, rawWAV, 1); err != nil {
-		return SegResult{}, err
-	}
+	rawWAV := filepath.Join(workDir, rawWAVName)
 	rawMS, err := wavDurationMS(rawWAV)
 	if err != nil {
 		return SegResult{}, fmt.Errorf("inspect edge-tts WAV: %w", err)

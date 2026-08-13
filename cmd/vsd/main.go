@@ -22,7 +22,9 @@ import (
 	"github.com/sequencestream/video-stream/internal/httpapi"
 	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
+	"github.com/sequencestream/video-stream/internal/intake"
 	"github.com/sequencestream/video-stream/internal/logging"
+	"github.com/sequencestream/video-stream/internal/media"
 	"github.com/sequencestream/video-stream/internal/provider"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
@@ -34,7 +36,6 @@ import (
 	"github.com/sequencestream/video-stream/internal/tasks"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 	"github.com/sequencestream/video-stream/internal/visual"
-	"github.com/sequencestream/video-stream/internal/webui"
 	"github.com/sequencestream/video-stream/internal/wizard"
 	"github.com/sequencestream/video-stream/internal/youtube"
 	"github.com/sequencestream/video-stream/internal/youtube/notify"
@@ -106,12 +107,17 @@ func run() error {
 
 	registry := queue.NewRegistry()
 	var tts audio.TTS
+	// The duration prober is chosen alongside the TTS engine, not after it:
+	// measuring a line requires an engine that reports what it produced, and
+	// the stub stretches its output to whatever budget it is handed.
+	var prober intake.Prober = audio.EstimateProbe{}
 	switch cfg.Audio.Provider {
 	case "edge":
-		tts = audio.EdgeTTS{
+		edge := audio.EdgeTTS{
 			OutputDir: cfg.Storage.OutputDir, DefaultVoice: cfg.Audio.DefaultVoice,
 			PythonBinary: cfg.Audio.PythonBinary, FFmpegBinary: cfg.Audio.FFmpegBinary,
 		}
+		tts, prober = edge, audio.TTSProbe{TTS: edge}
 	case "stub":
 		tts = audio.StubTTS{MSPerWord: 180}
 	}
@@ -131,6 +137,12 @@ func run() error {
 		MediaDir:      cfg.Storage.MediaDir, FFmpegBinary: cfg.Audio.FFmpegBinary,
 		Reporter: reporter, Audio: audioEngine,
 	})
+
+	intakeEngine := intake.New(intake.Options{
+		Projects: taskStore, Prober: prober,
+		Voice: cfg.Audio.DefaultVoice, Reporter: reporter,
+	})
+	mediaPreparer := media.Preparer{MediaDir: cfg.Storage.MediaDir, FFmpegBinary: cfg.Audio.FFmpegBinary}
 
 	tasks.Register(registry, tasks.Deps{
 		Sidecar:   sidecarClient,
@@ -224,8 +236,6 @@ func run() error {
 		go runRadarPolling(ctx, logger, radarEngine, cfg.Radar.Interval)
 	}
 
-	logger.Info("webui", slog.Bool("embedded", webui.Built()))
-
 	api := httpapi.NewServer(httpapi.Deps{
 		Config:       cfg,
 		Store:        taskStore,
@@ -244,7 +254,9 @@ func run() error {
 		CostWarden:   costEngine,
 		YouTube:      youtubeEngine,
 		Wizard:       wizardEngine,
-		WebUI:        webui.Handler(),
+		Intake:       intakeEngine,
+		Projects:     taskStore,
+		Media:        &mediaPreparer,
 		Logger:       logger,
 		Version:      version,
 	})

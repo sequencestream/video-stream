@@ -84,7 +84,7 @@ vs credential rm openai       # 从所有持有它的后端删除
 - **按字段名**：`slog` 的 `ReplaceAttr` 会把 `api_key`、`token`、`password`、`secret` 这类字段名对应的值换掉。`X-Api-Key`、`APIKey`、`api_key` 归一化后是同一个名字。
 - **按值**：任何交给 `provider.Registry` 的密钥都会注册进 `redact.Registry`，此后它作为**子串**出现在任何日志、任务回执或错误信息里都会被替换成 `[REDACTED]`——包括供应商 401 响应体原样回显密钥这种情况。
 
-任务回执（`result` 与 `error`）在写进 SQLite **之前**过一遍脱敏，因为回执会被 API 返回、被 WebUI 展示，是最容易被截图外发的东西。
+任务回执（`result` 与 `error`）在写进 SQLite **之前**过一遍脱敏，因为回执会被 API 返回、被 CLI 打印、被调用方记进日志，是最容易外泄的东西。
 
 `/v1/meta` 只报告 `has_credential` 与 `credential_from`，永远不回显密钥本身。
 

@@ -57,7 +57,7 @@
 - [ ] 接入真实 embedding provider，替换结构卡片的伪 embedding。
 - [ ] 实现真实 prompt enrichment，同时确保 1080p 阶段复用 720p 的 prompt/seed/ref，不再次调用 LLM。
 
-### 6. 完善 7 步 WebUI
+### 6. 完善 7 步编排（CLI / API）
 
 - [x] 将 session id 写入 URL 或持久化存储，刷新后通过 GET 恢复。
 - [ ] 支持录入、编辑和选择真实对标账号，移除硬编码 `@peer1`。
@@ -150,5 +150,5 @@
 1. **M0：流程可继续**——修复工程持久化，Step 1 → Step 7 集成测试通过。
 2. **M1：真实可播放**——真实 TTS、本地素材和 FFmpeg 产出可播放 720p/1080p MP4。
 3. **M2：增量有效**——编辑一个 seg 时只重生成失效子树，并记录真实节省成本。
-4. **M3：内容可用**——接入真实脚本 Agent、素材 provider 和完整 WebUI 操作。
+4. **M3：内容可用**——接入真实脚本 Agent、素材 provider，补全 CLI 的分步操作。
 5. **M4：输入与交付完整**——ASR/降噪、官方雷达 source、容器标识和真实发布稳定运行。

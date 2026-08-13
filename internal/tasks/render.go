@@ -49,11 +49,12 @@ func RenderHandler(engine *render.Engine, projects store.ProjectStore) queue.Han
 		runID, _ := t.Payload["run_id"].(string)
 		platform, _ := t.Payload["platform"].(string)
 		subtitleMode, _ := t.Payload["subtitle_mode"].(string)
+		stillImages, _ := t.Payload["still_images"].(bool)
 
 		result, err := engine.Run(ctx, render.RunRequest{
 			RunID: runID, Project: project, Resolution: res,
 			Finalized: finalized, IncludeBGM: includeBGM || bgm.URI != "", BGM: bgm, ResumeFrom: resumeFrom,
-			Platform: platform, SubtitleMode: audio.SubtitleMode(subtitleMode),
+			Platform: platform, SubtitleMode: audio.SubtitleMode(subtitleMode), StillImages: stillImages,
 		})
 		if err != nil {
 			return nil, err

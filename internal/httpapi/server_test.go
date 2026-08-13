@@ -56,33 +56,6 @@ func TestMetaReportsCredentialPresenceWithoutTheKey(t *testing.T) {
 	}
 }
 
-// TestAPIRoutesWinOverTheWebUI guards the routing order. The UI is registered
-// on "/", which in net/http is the catch-all, so a mistake here would silently
-// serve HTML where the CLI expects JSON.
-func TestAPIRoutesWinOverTheWebUI(t *testing.T) {
-	deps := newDeps(t)
-	deps.WebUI = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, "<html>webui</html>")
-	})
-	handler := NewServer(deps).Handler()
-
-	for _, path := range []string{"/healthz", "/readyz", "/v1/meta", "/v1/tasks", "/v1/recompile/report", "/v1/radar/accounts", "/v1/radar/signals"} {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if strings.Contains(rec.Body.String(), "webui") {
-			t.Errorf("GET %s was served by the WebUI handler", path)
-		}
-	}
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/wizard/1/", nil))
-	if !strings.Contains(rec.Body.String(), "webui") {
-		t.Errorf("GET /wizard/1/ should reach the WebUI handler, got %q", rec.Body.String())
-	}
-}
-
-// TestRootIsUnroutedWithoutAWebUI keeps the API-only build honest: no handler,
-// no route.
 func TestRootIsUnroutedWithoutAWebUI(t *testing.T) {
 	handler := NewServer(newDeps(t)).Handler()
 

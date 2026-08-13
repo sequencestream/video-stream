@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,82 @@ func TestFFmpegVideoGeneratorAcceptsExplicitFileURI(t *testing.T) {
 	if info, err := os.Stat(generated.URI); err != nil || info.Size() == 0 {
 		t.Fatalf("generated visual is missing or empty: info=%v err=%v", info, err)
 	}
+}
+
+func TestFFmpegVideoGeneratorStillImageHoldsTheFrame(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "poster.png")
+	// testsrc is asymmetric, so a Ken Burns pan is visible as a frame difference.
+	makeMediaFixture(t, ffmpeg, "-f", "lavfi", "-i", "testsrc=s=640x480", "-frames:v", "1", imagePath)
+	generator := render.FFmpegVideoGenerator{Binary: ffmpeg, OutputDir: filepath.Join(dir, "output")}
+
+	// The comparison is a mean absolute difference rather than an equality
+	// check: lossy H.264 reconstruction makes even an identical source frame
+	// differ by a few levels, while a pan moves whole edges across the frame.
+	const maxStillDrift = 2.0
+
+	tests := []struct {
+		name  string
+		still bool
+		seg   string
+	}{
+		{name: "still image holds the frame", still: true, seg: "still"},
+		{name: "default applies Ken Burns", still: false, seg: "panned"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			generated, err := generator.Generate(ctx, render.VideoGenInput{
+				Resolution: render.Resolution720p, ProjectID: "project", SegID: tt.seg,
+				Text: "A useful visual", DurationMS: 600, RenderCacheKey: "rk2:" + tt.seg,
+				RefURI: "file://" + filepath.ToSlash(imagePath), StillImage: tt.still,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := rawFrame(t, ffmpeg, generated.URI)
+			last := rawFrame(t, ffmpeg, generated.URI, "-sseof", "-0.05")
+			drift := meanAbsDiff(t, first, last)
+			if tt.still && drift > maxStillDrift {
+				t.Fatalf("still visual drifted by %.2f levels, want <= %.2f", drift, maxStillDrift)
+			}
+			if !tt.still && drift <= maxStillDrift {
+				t.Fatalf("Ken Burns visual drifted by only %.2f levels, want > %.2f", drift, maxStillDrift)
+			}
+		})
+	}
+}
+
+// rawFrame decodes one frame as rgb24 so two frames can be compared per pixel.
+func rawFrame(t *testing.T, ffmpeg, path string, seek ...string) []byte {
+	t.Helper()
+	args := append([]string{"-hide_banner", "-loglevel", "error"}, seek...)
+	args = append(args, "-i", path, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-")
+	out, err := exec.Command(ffmpeg, args...).Output()
+	if err != nil {
+		t.Fatalf("decode frame from %s: %v", path, err)
+	}
+	if len(out) == 0 {
+		t.Fatalf("decoded an empty frame from %s", path)
+	}
+	return out
+}
+
+func meanAbsDiff(t *testing.T, a, b []byte) float64 {
+	t.Helper()
+	if len(a) != len(b) {
+		t.Fatalf("frame sizes differ: %d vs %d", len(a), len(b))
+	}
+	var total float64
+	for i := range a {
+		total += math.Abs(float64(a[i]) - float64(b[i]))
+	}
+	return total / float64(len(a))
 }
 
 func makeMediaFixture(t *testing.T, ffmpeg string, args ...string) {

@@ -46,4 +46,4 @@ GET  /v1/cost/capabilities
 
 ## 工程文件
 
-`project.cost_plan` 在 wizard 脚本步（step 4）写入，WebUI 通过 `session.state.cost_plan` 展示。
+`project.cost_plan` 在 wizard 脚本步（step 4）写入，调用方从 `session.state.cost_plan` 读取。

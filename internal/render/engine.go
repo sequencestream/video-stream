@@ -28,6 +28,10 @@ type RunRequest struct {
 	ResumeFrom   string
 	Platform     string
 	SubtitleMode audio.SubtitleMode
+	// StillImages holds local image sources steady instead of applying Ken
+	// Burns. Useful when the image already carries composed text: a slow zoom
+	// crops it out of frame.
+	StillImages bool
 	// RecompilePlan is the planner's exact decision for an edited preview.
 	// Nil means this is a normal full render rather than an incremental edit.
 	RecompilePlan *recompile.Plan
@@ -521,6 +525,7 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 				Resolution: req.Resolution, ProjectID: req.Project.ID, SegID: s.SegID,
 				Text: s.Text, DurationMS: s.DurationBudget.TargetMS(), RenderCacheKey: key,
 				Prompt: vis.Prompt, Seed: vis.Seed, RefURI: vis.RefURI,
+				StillImage: req.StillImages,
 			})
 			if err != nil {
 				return nil, err

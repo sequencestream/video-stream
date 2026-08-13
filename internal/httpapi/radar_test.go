@@ -157,18 +157,20 @@ func radarReadingsForHotFixture(accountID string, published, observed time.Time)
 	return readings
 }
 
-func TestAPIRoutesWinOverTheWebUIIncludesRadar(t *testing.T) {
-	deps := newDeps(t)
-	deps.WebUI = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte("<html>webui</html>"))
-	})
-	handler := NewServer(deps).Handler()
+// TestRadarRoutesAnswerJSON guards that the radar routes stay registered. They
+// answer with empty collections rather than 404 when nothing is watched yet,
+// which is what makes "nothing imported" distinguishable from "bad deploy".
+func TestRadarRoutesAnswerJSON(t *testing.T) {
+	handler := NewServer(newDeps(t)).Handler()
 
 	for _, path := range []string{"/v1/radar/accounts", "/v1/radar/signals"} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if strings.Contains(rec.Body.String(), "webui") {
-			t.Errorf("GET %s was served by the WebUI handler", path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, rec.Code)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+			t.Errorf("GET %s content-type = %q, want JSON", path, got)
 		}
 	}
 }
