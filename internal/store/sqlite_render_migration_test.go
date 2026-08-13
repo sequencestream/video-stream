@@ -34,7 +34,7 @@ func TestRenderSubtitleMigrationUpgradesExistingDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, column := range []string{"platform", "subtitle_mode"} {
+	for _, column := range []string{"platform", "subtitle_mode", "include_bgm", "bgm_uri", "bgm_bpm", "bgm_beat_offset_ms", "bgm_gain_db"} {
 		exists, err := sqliteColumnExists(store.db, "render_runs", column)
 		if err != nil || !exists {
 			t.Fatalf("column %s: exists=%v err=%v", column, exists, err)
@@ -46,5 +46,8 @@ func TestRenderSubtitleMigrationUpgradesExistingDatabase(t *testing.T) {
 	}
 	if run.Platform != "youtube" || run.SubtitleMode != "soft" {
 		t.Fatalf("legacy defaults=%s/%s", run.Platform, run.SubtitleMode)
+	}
+	if run.IncludeBGM || run.BGMURI != "" || run.BGMBPM != 0 || run.BGMBeatOffsetMS != 0 || run.BGMGainDB != 0 {
+		t.Fatalf("legacy BGM defaults=%+v", run)
 	}
 }

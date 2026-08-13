@@ -14,6 +14,11 @@ type RenderRunRecord struct {
 	SubtitleMode       string    `json:"subtitle_mode"`
 	Status             string    `json:"status"`
 	Finalized          bool      `json:"finalized"`
+	IncludeBGM         bool      `json:"include_bgm"`
+	BGMURI             string    `json:"bgm_uri,omitempty"`
+	BGMBPM             float64   `json:"bgm_bpm,omitempty"`
+	BGMBeatOffsetMS    int64     `json:"bgm_beat_offset_ms,omitempty"`
+	BGMGainDB          float64   `json:"bgm_gain_db,omitempty"`
 	LastCompletedStage string    `json:"last_completed_stage,omitempty"`
 	OutputURI          string    `json:"output_uri,omitempty"`
 	Error              string    `json:"error,omitempty"`

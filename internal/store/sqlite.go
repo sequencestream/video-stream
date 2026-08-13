@@ -224,6 +224,11 @@ CREATE TABLE IF NOT EXISTS render_runs (
 	subtitle_mode        TEXT NOT NULL DEFAULT 'soft',
 	status               TEXT NOT NULL,
 	finalized            INTEGER NOT NULL DEFAULT 0,
+	include_bgm          INTEGER NOT NULL DEFAULT 0,
+	bgm_uri              TEXT NOT NULL DEFAULT '',
+	bgm_bpm              REAL NOT NULL DEFAULT 0,
+	bgm_beat_offset_ms   INTEGER NOT NULL DEFAULT 0,
+	bgm_gain_db          REAL NOT NULL DEFAULT 0,
 	last_completed_stage TEXT NOT NULL DEFAULT '',
 	output_uri           TEXT NOT NULL DEFAULT '',
 	error                TEXT NOT NULL DEFAULT '',
@@ -351,9 +356,18 @@ func applySQLiteMigrations(db *sql.DB) error {
 	}); err != nil {
 		return err
 	}
-	return applyColumnMigration(db, "002_render_subtitle_delivery", "render_runs", []struct{ name, ddl string }{
+	if err := applyColumnMigration(db, "002_render_subtitle_delivery", "render_runs", []struct{ name, ddl string }{
 		{"platform", `ALTER TABLE render_runs ADD COLUMN platform TEXT NOT NULL DEFAULT 'youtube'`},
 		{"subtitle_mode", `ALTER TABLE render_runs ADD COLUMN subtitle_mode TEXT NOT NULL DEFAULT 'soft'`},
+	}); err != nil {
+		return err
+	}
+	return applyColumnMigration(db, "003_render_bgm", "render_runs", []struct{ name, ddl string }{
+		{"include_bgm", `ALTER TABLE render_runs ADD COLUMN include_bgm INTEGER NOT NULL DEFAULT 0`},
+		{"bgm_uri", `ALTER TABLE render_runs ADD COLUMN bgm_uri TEXT NOT NULL DEFAULT ''`},
+		{"bgm_bpm", `ALTER TABLE render_runs ADD COLUMN bgm_bpm REAL NOT NULL DEFAULT 0`},
+		{"bgm_beat_offset_ms", `ALTER TABLE render_runs ADD COLUMN bgm_beat_offset_ms INTEGER NOT NULL DEFAULT 0`},
+		{"bgm_gain_db", `ALTER TABLE render_runs ADD COLUMN bgm_gain_db REAL NOT NULL DEFAULT 0`},
 	})
 }
 
