@@ -42,18 +42,20 @@ type RunResult struct {
 
 // Options configures the Engine.
 type Options struct {
-	Store        store.RenderStore
-	Artifacts    store.ArtifactStore
-	OutputDir    string
-	MediaDir     string
-	FFmpegBinary string
-	FFmpeg       FFmpeg
-	Video        VideoGenerator
-	Prompts      PromptGenerator
-	Reporter     telemetry.Reporter
-	Labels       label.Injector
-	Audio        *audio.Engine
-	BGMMixer     BGMMixer
+	Store         store.RenderStore
+	Artifacts     store.ArtifactStore
+	OutputDir     string
+	MediaDir      string
+	FFmpegBinary  string
+	FFprobeBinary string
+	FFmpeg        FFmpeg
+	Validator     OutputValidator
+	Video         VideoGenerator
+	Prompts       PromptGenerator
+	Reporter      telemetry.Reporter
+	Labels        label.Injector
+	Audio         *audio.Engine
+	BGMMixer      BGMMixer
 	// StageHook is for tests: return an error to simulate a stage failure.
 	StageHook func(stage string) error
 }
@@ -64,6 +66,7 @@ type Engine struct {
 	artifacts store.ArtifactStore
 	outputDir string
 	ffmpeg    FFmpeg
+	validator OutputValidator
 	video     VideoGenerator
 	prompts   PromptGenerator
 	reporter  telemetry.Reporter
@@ -75,12 +78,14 @@ type Engine struct {
 }
 
 // New builds an Engine with production-safe defaults. Tests without real media
-// fixtures should explicitly inject StubFFmpeg and StubVideoGenerator.
+// fixtures should explicitly inject StubFFmpeg, StubVideoGenerator, and
+// StubOutputValidator.
 func New(opts Options) *Engine {
 	e := &Engine{
 		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
 		ffmpeg: opts.FFmpeg, video: opts.Video, prompts: opts.Prompts,
-		reporter: opts.Reporter, stageHook: opts.StageHook, labels: opts.Labels,
+		validator: opts.Validator,
+		reporter:  opts.Reporter, stageHook: opts.StageHook, labels: opts.Labels,
 		audio: opts.Audio, bgm: opts.BGMMixer, mediaDir: opts.MediaDir,
 	}
 	if e.labels == nil {
@@ -88,6 +93,12 @@ func New(opts Options) *Engine {
 	}
 	if e.ffmpeg == nil {
 		e.ffmpeg = ExecFFmpeg{Binary: opts.FFmpegBinary}
+	}
+	if e.validator == nil {
+		e.validator = ExecOutputValidator{
+			FFprobeBinary: firstNonEmpty(opts.FFprobeBinary, defaultFFprobeBinary(opts.FFmpegBinary)),
+			FFmpegBinary:  opts.FFmpegBinary,
+		}
 	}
 	if e.video == nil {
 		e.video = FFmpegVideoGenerator{Binary: opts.FFmpegBinary, OutputDir: opts.OutputDir, MediaDir: opts.MediaDir}
@@ -263,6 +274,23 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		_ = e.store.UpdateRenderRun(ctx, run)
 		return RunResult{}, fmt.Errorf("%w: %v", ErrLabelRejected, err)
 	}
+	outputDuration := time.Duration(0)
+	for _, duration := range durations {
+		outputDuration += duration
+	}
+	if err := e.validator.Validate(ctx, outPath, OutputSpec{
+		Container: "mp4", Width: width, Height: height,
+		Duration: outputDuration, DurationTolerance: 250 * time.Millisecond,
+		RequireAudio: true,
+	}); err != nil {
+		run.Status = "failed"
+		run.Error = fmt.Sprintf("%s: %v", ErrOutputRejected, err)
+		_ = e.store.UpdateRenderRun(ctx, run)
+		if removeErr := os.Remove(outPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return RunResult{}, fmt.Errorf("%w: %v (remove rejected output: %v)", ErrOutputRejected, err, removeErr)
+		}
+		return RunResult{}, fmt.Errorf("%w: %v", ErrOutputRejected, err)
+	}
 
 	run.Status = "completed"
 	run.OutputURI = outPath
@@ -286,6 +314,15 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		OutputURI: outPath, CompletedStages: completed,
 		SharedContext: shared, SegArtifacts: segArts,
 	}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (e *Engine) resolveSharedContext(ctx context.Context, req RunRequest) ([]SharedVisual, error) {
