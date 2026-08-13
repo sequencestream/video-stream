@@ -24,6 +24,7 @@ services:
       VS_SIDECAR_BASE_URL: "http://sidecar:8090"
       VS_DATA_DIR: "/var/lib/video-stream"
       VS_OUTPUT_DIR: "/var/lib/video-stream/output"
+      VS_MEDIA_DIR: "/var/lib/video-stream/media"
       VS_LOG_LEVEL: "info"
       VS_LOG_FORMAT: "json"
       VS_TELEMETRY_ENABLED: "true"

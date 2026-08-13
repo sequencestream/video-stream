@@ -127,6 +127,7 @@ func run() error {
 	})
 	renderEngine := render.New(render.Options{
 		Store: taskStore, Artifacts: taskStore, OutputDir: cfg.Storage.OutputDir,
+		MediaDir: cfg.Storage.MediaDir, FFmpegBinary: cfg.Audio.FFmpegBinary,
 		Reporter: reporter, Audio: audioEngine,
 	})
 

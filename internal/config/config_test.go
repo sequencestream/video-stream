@@ -13,6 +13,9 @@ func TestDefaultUsesRealEdgeTTS(t *testing.T) {
 	if cfg.Audio.DefaultVoice == "" || cfg.Audio.PythonBinary == "" || cfg.Audio.FFmpegBinary == "" {
 		t.Fatalf("edge TTS defaults are incomplete: %+v", cfg.Audio)
 	}
+	if cfg.Storage.MediaDir == "" {
+		t.Fatal("local media directory default is empty")
+	}
 }
 
 func TestValidateRejectsUnknownTTSProvider(t *testing.T) {

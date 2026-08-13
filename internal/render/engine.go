@@ -38,15 +38,17 @@ type RunResult struct {
 
 // Options configures the Engine.
 type Options struct {
-	Store     store.RenderStore
-	Artifacts store.ArtifactStore
-	OutputDir string
-	FFmpeg    FFmpeg
-	Video     VideoGenerator
-	Prompts   PromptGenerator
-	Reporter  telemetry.Reporter
-	Labels    label.Injector
-	Audio     *audio.Engine
+	Store        store.RenderStore
+	Artifacts    store.ArtifactStore
+	OutputDir    string
+	MediaDir     string
+	FFmpegBinary string
+	FFmpeg       FFmpeg
+	Video        VideoGenerator
+	Prompts      PromptGenerator
+	Reporter     telemetry.Reporter
+	Labels       label.Injector
+	Audio        *audio.Engine
 	// StageHook is for tests: return an error to simulate a stage failure.
 	StageHook func(stage string) error
 }
@@ -78,10 +80,10 @@ func New(opts Options) *Engine {
 		e.labels = label.SidecarInjector{}
 	}
 	if e.ffmpeg == nil {
-		e.ffmpeg = ExecFFmpeg{}
+		e.ffmpeg = ExecFFmpeg{Binary: opts.FFmpegBinary}
 	}
 	if e.video == nil {
-		e.video = StubVideoGenerator{OutputDir: opts.OutputDir}
+		e.video = FFmpegVideoGenerator{Binary: opts.FFmpegBinary, OutputDir: opts.OutputDir, MediaDir: opts.MediaDir}
 	}
 	if e.prompts == nil {
 		e.prompts = NopPromptGenerator{}
@@ -326,7 +328,8 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 			return nil, fmt.Errorf("missing shared context for %s", key)
 		}
 		uri, err := e.video.Generate(ctx, VideoGenInput{
-			Resolution: req.Resolution, RenderCacheKey: key,
+			Resolution: req.Resolution, ProjectID: req.Project.ID, SegID: s.SegID,
+			Text: s.Text, DurationMS: s.DurationBudget.TargetMS(), RenderCacheKey: key,
 			Prompt: vis.Prompt, Seed: vis.Seed, RefURI: vis.RefURI,
 		})
 		if err != nil {
@@ -343,7 +346,7 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 		if e.artifacts != nil {
 			_ = e.artifacts.PutArtifact(ctx, store.Artifact{
 				RenderCacheKey: key,
-				DurationMS:     s.DurationBudget.MaxMS,
+				DurationMS:     s.DurationBudget.TargetMS(),
 				URI:            uri,
 			})
 		}

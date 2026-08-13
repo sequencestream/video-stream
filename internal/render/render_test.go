@@ -40,6 +40,9 @@ func openEngine(t *testing.T, opts render.Options) *render.Engine {
 	if opts.FFmpeg == nil {
 		opts.FFmpeg = render.StubFFmpeg{}
 	}
+	if opts.Video == nil {
+		opts.Video = render.StubVideoGenerator{OutputDir: opts.OutputDir}
+	}
 	opts.Store = db
 	opts.Artifacts = db
 	return render.New(opts)

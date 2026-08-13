@@ -49,7 +49,7 @@ RUN apk add --no-cache ca-certificates ffmpeg py3-pip wget \
 COPY --from=build /out/vsd /usr/local/bin/vsd
 COPY --from=build /out/vs  /usr/local/bin/vs
 
-RUN mkdir -p /var/lib/video-stream /var/lib/video-stream/output \
+RUN mkdir -p /var/lib/video-stream /var/lib/video-stream/output /var/lib/video-stream/media \
  && chown -R app:app /var/lib/video-stream
 
 USER app
@@ -57,7 +57,8 @@ WORKDIR /var/lib/video-stream
 
 ENV VS_SERVER_ADDR=:8080 \
     VS_DATA_DIR=/var/lib/video-stream \
-    VS_OUTPUT_DIR=/var/lib/video-stream/output
+    VS_OUTPUT_DIR=/var/lib/video-stream/output \
+    VS_MEDIA_DIR=/var/lib/video-stream/media
 
 EXPOSE 8080
 

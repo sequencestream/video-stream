@@ -11,7 +11,7 @@ FFmpeg 直出 MP4；不解析剪映草稿回流。Stage 顺序：
 5. `mux` — 合成 MP4
 6. `bgm_beat` — BGM 卡点（**仅定稿后**）
 
-生产路径默认使用本机 `ffmpeg` 执行器；测试若不提供真实媒体 fixture，须显式注入 `StubFFmpeg`。执行器按输入顺序拼接同规格视频片段，选取最后生成的音轨，将 WebVTT/SRT 作为 `mov_text` 软字幕封装，并通过同目录临时文件原子发布最终 MP4。运行镜像内置 FFmpeg。
+生产路径默认使用本机 `ffmpeg` 执行器；测试若不提供真实媒体 fixture，须显式注入 `StubFFmpeg` 和 `StubVideoGenerator`。视觉执行器优先读取 `media/<project_id>/<seg_id>` 下的本地视频或图片：视频会循环、缩放、裁剪到 segment 时长，图片会应用由 seg 内容确定的可复现 Ken Burns；没有本地素材时生成确定性的 motion graphics。所有片段统一输出 H.264/yuv420p MP4。Mux 执行器按输入顺序拼接同规格视频片段，选取最后生成的音轨，将 WebVTT/SRT 作为 `mov_text` 软字幕封装，并通过同目录临时文件原子发布最终 MP4。运行镜像内置 FFmpeg。
 
 ## 720p / 1080p 共享缓存
 
