@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sequencestream/video-stream/internal/audio"
@@ -22,6 +23,7 @@ type RunRequest struct {
 	Resolution   Resolution
 	Finalized    bool
 	IncludeBGM   bool
+	BGM          BGMConfig
 	ResumeFrom   string
 	Platform     string
 	SubtitleMode audio.SubtitleMode
@@ -51,6 +53,7 @@ type Options struct {
 	Reporter     telemetry.Reporter
 	Labels       label.Injector
 	Audio        *audio.Engine
+	BGMMixer     BGMMixer
 	// StageHook is for tests: return an error to simulate a stage failure.
 	StageHook func(stage string) error
 }
@@ -66,6 +69,8 @@ type Engine struct {
 	reporter  telemetry.Reporter
 	labels    label.Injector
 	audio     *audio.Engine
+	bgm       BGMMixer
+	mediaDir  string
 	stageHook func(stage string) error
 }
 
@@ -76,7 +81,7 @@ func New(opts Options) *Engine {
 		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
 		ffmpeg: opts.FFmpeg, video: opts.Video, prompts: opts.Prompts,
 		reporter: opts.Reporter, stageHook: opts.StageHook, labels: opts.Labels,
-		audio: opts.Audio,
+		audio: opts.Audio, bgm: opts.BGMMixer, mediaDir: opts.MediaDir,
 	}
 	if e.labels == nil {
 		e.labels = label.SidecarInjector{}
@@ -89,6 +94,9 @@ func New(opts Options) *Engine {
 	}
 	if e.prompts == nil {
 		e.prompts = NopPromptGenerator{}
+	}
+	if e.bgm == nil {
+		e.bgm = ExecBGMMixer{Binary: opts.FFmpegBinary}
 	}
 	if e.reporter == nil {
 		e.reporter = telemetry.Nop()
@@ -119,6 +127,16 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	}
 	if req.IncludeBGM && !req.Finalized {
 		return RunResult{}, ErrNotFinalized
+	}
+	if req.IncludeBGM {
+		resolved, err := e.resolveBGM(req.Project.ID, req.BGM)
+		if err != nil {
+			return RunResult{}, err
+		}
+		req.BGM = resolved.withDefaults()
+		if err := req.BGM.Validate(); err != nil {
+			return RunResult{}, err
+		}
 	}
 	if e.outputDir == "" {
 		return RunResult{}, fmt.Errorf("render output dir is not configured")
@@ -333,16 +351,63 @@ func (e *Engine) runStage(ctx context.Context, req RunRequest, stage string, sha
 	case StageAudio, StageSubtitles, StageLoudness:
 		return e.runAudioStage(ctx, req, stage)
 	case StageBGMBeat:
-		path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, "bgm_aligned.wav")
-		if err := writeStubFile(path, "bgm"); err != nil {
-			return nil, err
-		}
-		return []string{path}, nil
+		return e.runBGMStage(ctx, req)
 	case StageMux:
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnknownStage, stage)
 	}
+}
+
+func (e *Engine) resolveBGM(projectID string, cfg BGMConfig) (BGMConfig, error) {
+	if strings.TrimSpace(cfg.URI) != "" {
+		cfg.URI = strings.TrimPrefix(cfg.URI, "file://")
+		return cfg, nil
+	}
+	if strings.TrimSpace(e.mediaDir) == "" {
+		return BGMConfig{}, errors.New("include_bgm requires bgm.uri or a configured media directory")
+	}
+	for _, ext := range []string{".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus"} {
+		path := filepath.Join(e.mediaDir, projectID, "bgm"+ext)
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			cfg.URI = path
+			return cfg, nil
+		} else if err != nil && !os.IsNotExist(err) {
+			return BGMConfig{}, err
+		}
+	}
+	return BGMConfig{}, fmt.Errorf("no BGM found for project %s; set bgm.uri or add media/%s/bgm.*", projectID, projectID)
+}
+
+func (e *Engine) runBGMStage(ctx context.Context, req RunRequest) ([]string, error) {
+	runDir := filepath.Join(e.outputDir, req.Project.ID, req.RunID)
+	output := filepath.Join(runDir, "bgm_aligned.wav")
+	var cuts []time.Duration
+	total := time.Duration(0)
+	for i, seg := range req.Project.Segs {
+		total += time.Duration(seg.DurationBudget.TargetMS()) * time.Millisecond
+		if i < len(req.Project.Segs)-1 {
+			cuts = append(cuts, total)
+		}
+	}
+	spec, ok := audio.SpecFor(req.Platform)
+	if !ok {
+		return nil, fmt.Errorf("unknown audio platform %q", req.Platform)
+	}
+	result, err := e.bgm.Mix(ctx, BGMMixPlan{
+		SpeechPath: filepath.Join(runDir, StageLoudness+".wav"), OutputPath: output,
+		Config: req.BGM, CutPoints: cuts, TotalDuration: total,
+		TargetLUFS: spec.TargetLUFS, ToleranceLUFS: spec.LUFSTolerance,
+	})
+	if err != nil {
+		return nil, err
+	}
+	_ = telemetry.Report(ctx, e.reporter, "render.bgm_mixed", map[string]any{
+		"project_id": req.Project.ID, "run_id": req.RunID, "bpm": req.BGM.BPM,
+		"beat_phase_ms": result.TimelineBeatPhase.Milliseconds(), "source_start_ms": result.SourceStart.Milliseconds(),
+		"output_lufs": result.OutputLUFS,
+	})
+	return []string{output}, nil
 }
 
 func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []SharedVisual) ([]string, error) {
@@ -391,7 +456,8 @@ func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.Ren
 	if req.RunID != "" {
 		existing, err := e.store.GetRenderRun(ctx, req.RunID)
 		if err == nil {
-			if existing.ProjectID != req.Project.ID || existing.Resolution != string(req.Resolution) || existing.Finalized != req.Finalized || existing.Platform != req.Platform || existing.SubtitleMode != string(req.SubtitleMode) {
+			if existing.ProjectID != req.Project.ID || existing.Resolution != string(req.Resolution) || existing.Finalized != req.Finalized || existing.Platform != req.Platform || existing.SubtitleMode != string(req.SubtitleMode) ||
+				existing.IncludeBGM != req.IncludeBGM || existing.BGMURI != req.BGM.URI || existing.BGMBPM != req.BGM.BPM || existing.BGMBeatOffsetMS != req.BGM.BeatOffsetMS || existing.BGMGainDB != req.BGM.GainDB {
 				return store.RenderRunRecord{}, fmt.Errorf("run id %s belongs to a different render request", req.RunID)
 			}
 			return existing, nil
@@ -403,7 +469,9 @@ func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.Ren
 	run := store.RenderRunRecord{
 		ID: req.RunID, ProjectID: req.Project.ID,
 		Resolution: string(req.Resolution), Platform: req.Platform, SubtitleMode: string(req.SubtitleMode), Status: "pending",
-		Finalized: req.Finalized,
+		Finalized:  req.Finalized,
+		IncludeBGM: req.IncludeBGM, BGMURI: req.BGM.URI, BGMBPM: req.BGM.BPM,
+		BGMBeatOffsetMS: req.BGM.BeatOffsetMS, BGMGainDB: req.BGM.GainDB,
 	}
 	if err := e.store.CreateRenderRun(ctx, run); err != nil {
 		return store.RenderRunRecord{}, err

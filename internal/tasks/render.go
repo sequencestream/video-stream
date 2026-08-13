@@ -36,6 +36,15 @@ func RenderHandler(engine *render.Engine, projects store.ProjectStore) queue.Han
 		}
 		finalized, _ := t.Payload["finalized"].(bool)
 		includeBGM, _ := t.Payload["include_bgm"].(bool)
+		bgm := render.BGMConfig{}
+		if raw, ok := t.Payload["bgm"].(map[string]any); ok {
+			bgm.URI, _ = raw["uri"].(string)
+			bgm.BPM, _ = raw["bpm"].(float64)
+			if n, ok := raw["beat_offset_ms"].(float64); ok {
+				bgm.BeatOffsetMS = int64(n)
+			}
+			bgm.GainDB, _ = raw["gain_db"].(float64)
+		}
 		resumeFrom, _ := t.Payload["resume_from"].(string)
 		runID, _ := t.Payload["run_id"].(string)
 		platform, _ := t.Payload["platform"].(string)
@@ -43,7 +52,7 @@ func RenderHandler(engine *render.Engine, projects store.ProjectStore) queue.Han
 
 		result, err := engine.Run(ctx, render.RunRequest{
 			RunID: runID, Project: project, Resolution: res,
-			Finalized: finalized, IncludeBGM: includeBGM, ResumeFrom: resumeFrom,
+			Finalized: finalized, IncludeBGM: includeBGM || bgm.URI != "", BGM: bgm, ResumeFrom: resumeFrom,
 			Platform: platform, SubtitleMode: audio.SubtitleMode(subtitleMode),
 		})
 		if err != nil {

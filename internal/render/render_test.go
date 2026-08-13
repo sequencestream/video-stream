@@ -3,6 +3,7 @@ package render_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,6 +95,38 @@ func TestBGMBeforeFinalizedErrors(t *testing.T) {
 	})
 	if !errors.Is(err, render.ErrNotFinalized) {
 		t.Fatalf("got %v, want ErrNotFinalized", err)
+	}
+}
+
+func TestFinalizedBGMStagePersistsParametersAndRejectsTrackChange(t *testing.T) {
+	dir := t.TempDir()
+	bgmPath := filepath.Join(dir, "music.wav")
+	if err := os.WriteFile(bgmPath, []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := openEngine(t, render.Options{BGMMixer: render.StubBGMMixer{}})
+	req := render.RunRequest{
+		RunID: "run-bgm", Project: sampleProject(t), Resolution: render.Resolution720p,
+		Finalized: true, IncludeBGM: true,
+		BGM: render.BGMConfig{URI: bgmPath, BPM: 100, BeatOffsetMS: 75, GainDB: -20},
+	}
+	result, err := eng.Run(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.CompletedStages[len(result.CompletedStages)-1]; got != render.StageBGMBeat {
+		t.Fatalf("last stage=%q want %q", got, render.StageBGMBeat)
+	}
+	run, _, err := eng.GetRun(t.Context(), req.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !run.IncludeBGM || run.BGMURI != bgmPath || run.BGMBPM != 100 || run.BGMBeatOffsetMS != 75 || run.BGMGainDB != -20 {
+		t.Fatalf("stored BGM=%+v", run)
+	}
+	req.BGM.BPM = 101
+	if _, err := eng.Run(t.Context(), req); err == nil || !strings.Contains(err.Error(), "different render request") {
+		t.Fatalf("track-changing resume err=%v", err)
 	}
 }
 

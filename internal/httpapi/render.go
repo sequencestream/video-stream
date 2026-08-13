@@ -15,6 +15,7 @@ type renderRunRequest struct {
 	Resolution   string             `json:"resolution"`
 	Finalized    bool               `json:"finalized"`
 	IncludeBGM   bool               `json:"include_bgm"`
+	BGM          render.BGMConfig   `json:"bgm,omitempty"`
 	ResumeFrom   string             `json:"resume_from,omitempty"`
 	RunID        string             `json:"run_id,omitempty"`
 	Platform     string             `json:"platform,omitempty"`
@@ -43,7 +44,7 @@ func (s *Server) handleRenderRun(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.deps.Render.Run(r.Context(), render.RunRequest{
 		RunID: req.RunID, Project: req.Project, Resolution: res,
-		Finalized: req.Finalized, IncludeBGM: req.IncludeBGM, ResumeFrom: req.ResumeFrom,
+		Finalized: req.Finalized, IncludeBGM: req.IncludeBGM || req.BGM.URI != "", BGM: req.BGM, ResumeFrom: req.ResumeFrom,
 		Platform: req.Platform, SubtitleMode: req.SubtitleMode,
 	})
 	if errors.Is(err, render.ErrNotFinalized) || errors.Is(err, render.ErrPreviewRequired) {

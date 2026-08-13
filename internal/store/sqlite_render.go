@@ -20,10 +20,15 @@ func (s *SQLiteStore) CreateRenderRun(ctx context.Context, run RenderRunRecord) 
 	if run.Finalized {
 		finalized = 1
 	}
+	includeBGM := 0
+	if run.IncludeBGM {
+		includeBGM = 1
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO render_runs (id, project_id, resolution, platform, subtitle_mode, status, finalized, last_completed_stage, output_uri, error, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO render_runs (id, project_id, resolution, platform, subtitle_mode, status, finalized, include_bgm, bgm_uri, bgm_bpm, bgm_beat_offset_ms, bgm_gain_db, last_completed_stage, output_uri, error, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.ProjectID, run.Resolution, run.Platform, run.SubtitleMode, run.Status, finalized,
+		includeBGM, run.BGMURI, run.BGMBPM, run.BGMBeatOffsetMS, run.BGMGainDB,
 		run.LastCompletedStage, run.OutputURI, run.Error, now)
 	return err
 }
@@ -33,10 +38,14 @@ func (s *SQLiteStore) UpdateRenderRun(ctx context.Context, run RenderRunRecord) 
 	if run.Finalized {
 		finalized = 1
 	}
+	includeBGM := 0
+	if run.IncludeBGM {
+		includeBGM = 1
+	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE render_runs SET platform=?, subtitle_mode=?, status=?, finalized=?, last_completed_stage=?, output_uri=?, error=?, updated_at=?
+		`UPDATE render_runs SET platform=?, subtitle_mode=?, status=?, finalized=?, include_bgm=?, bgm_uri=?, bgm_bpm=?, bgm_beat_offset_ms=?, bgm_gain_db=?, last_completed_stage=?, output_uri=?, error=?, updated_at=?
 		 WHERE id=?`,
-		run.Platform, run.SubtitleMode, run.Status, finalized, run.LastCompletedStage, run.OutputURI, run.Error,
+		run.Platform, run.SubtitleMode, run.Status, finalized, includeBGM, run.BGMURI, run.BGMBPM, run.BGMBeatOffsetMS, run.BGMGainDB, run.LastCompletedStage, run.OutputURI, run.Error,
 		time.Now().UTC().UnixMilli(), run.ID)
 	if err != nil {
 		return err
@@ -50,12 +59,12 @@ func (s *SQLiteStore) UpdateRenderRun(ctx context.Context, run RenderRunRecord) 
 
 func (s *SQLiteStore) GetRenderRun(ctx context.Context, runID string) (RenderRunRecord, error) {
 	var r RenderRunRecord
-	var finalized int
+	var finalized, includeBGM int
 	var updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, project_id, resolution, platform, subtitle_mode, status, finalized, last_completed_stage, output_uri, error, updated_at
+		`SELECT id, project_id, resolution, platform, subtitle_mode, status, finalized, include_bgm, bgm_uri, bgm_bpm, bgm_beat_offset_ms, bgm_gain_db, last_completed_stage, output_uri, error, updated_at
 		 FROM render_runs WHERE id=?`, runID).
-		Scan(&r.ID, &r.ProjectID, &r.Resolution, &r.Platform, &r.SubtitleMode, &r.Status, &finalized,
+		Scan(&r.ID, &r.ProjectID, &r.Resolution, &r.Platform, &r.SubtitleMode, &r.Status, &finalized, &includeBGM, &r.BGMURI, &r.BGMBPM, &r.BGMBeatOffsetMS, &r.BGMGainDB,
 			&r.LastCompletedStage, &r.OutputURI, &r.Error, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RenderRunRecord{}, ErrRenderRunNotFound
@@ -64,6 +73,7 @@ func (s *SQLiteStore) GetRenderRun(ctx context.Context, runID string) (RenderRun
 		return RenderRunRecord{}, fmt.Errorf("get render run %s: %w", runID, err)
 	}
 	r.Finalized = finalized != 0
+	r.IncludeBGM = includeBGM != 0
 	r.UpdatedAt = time.UnixMilli(updated).UTC()
 	return r, nil
 }
