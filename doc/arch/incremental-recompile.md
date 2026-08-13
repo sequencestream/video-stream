@@ -59,7 +59,18 @@ invalidated = dependentsOf(content ∪ rewired)  ∪  rewired
 key 相同**且**产物实际时长落在本次预算区间内。查不到产物、或时长顶出区间，就失效。
 
 命中一个 seg 就把它的 `cost_micros` 计入 `cost_saved_micros`。这个数字是省下的钱，
-不是花掉的钱——渲染器还不存在，没有真实开销可记。
+不是花掉的钱；规划阶段只读取历史 artifact 成本，不猜测本次执行的真实开销。
+
+## 交给渲染执行器
+
+向导在预览编辑时生成的 `recompile.Plan` 作为 `render.RunRequest.RecompilePlan` 原样传入
+渲染执行器。执行器在启动任何 stage 前验证计划与当前工程匹配：project id 必须一致，
+`invalidated` 与 `reused` 必须无重复地完整覆盖所有 seg；全量重跑还必须点名边界、失效全部
+seg 且不能声明复用。缺失、未知或重复 seg 的计划会被拒绝，不能静默少渲染。
+
+执行结果回传已接收的计划，向导据此发布失效数和总 seg 数。这让集成测试覆盖的是
+“规划器 → 执行器 → 向导状态”的真实交接，而不是只验证规划器在旁路算出了一个数字。
+本阶段只建立并校验执行契约；按计划复用 artifact 和只生成失效 seg 由后续实现完成。
 
 ## 六条边界：诚实地承认做不到
 

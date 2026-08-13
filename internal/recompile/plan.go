@@ -14,7 +14,11 @@
 // visibly broken.
 package recompile
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/sequencestream/video-stream/internal/model"
+)
 
 // Boundary names an edit that cannot be recompiled incrementally.
 //
@@ -98,6 +102,61 @@ func (p Plan) InvalidationRate() float64 {
 		return 0
 	}
 	return float64(len(p.Invalidated)) / float64(total)
+}
+
+// ValidateFor checks that a plan is a complete, unambiguous partition of the
+// project it will be used to render. Plans cross a package boundary into the
+// render executor, so accepting unknown, duplicate, or missing seg ids would
+// make it possible to silently skip work.
+func (p Plan) ValidateFor(project model.Project) error {
+	if p.ProjectID != project.ID {
+		return fmt.Errorf("recompile plan belongs to project %q, not %q", p.ProjectID, project.ID)
+	}
+	order, err := project.RenderOrder()
+	if err != nil {
+		return fmt.Errorf("validate recompile plan for project %s: %w", project.ID, err)
+	}
+	want := make(map[string]struct{}, len(order))
+	for _, id := range order {
+		want[id] = struct{}{}
+	}
+	seen := make(map[string]string, len(order))
+	check := func(kind string, ids []string) error {
+		for _, id := range ids {
+			if _, ok := want[id]; !ok {
+				return fmt.Errorf("recompile plan %s contains unknown seg %q", kind, id)
+			}
+			if previous, ok := seen[id]; ok {
+				return fmt.Errorf("recompile plan seg %q appears in both %s and %s", id, previous, kind)
+			}
+			seen[id] = kind
+		}
+		return nil
+	}
+	if err := check("invalidated", p.Invalidated); err != nil {
+		return err
+	}
+	if err := check("reused", p.Reused); err != nil {
+		return err
+	}
+	if len(seen) != len(want) {
+		for _, id := range order {
+			if _, ok := seen[id]; !ok {
+				return fmt.Errorf("recompile plan omits seg %q", id)
+			}
+		}
+	}
+	if p.FullRerun {
+		if p.Boundary == BoundaryNone {
+			return fmt.Errorf("full recompile plan has no boundary")
+		}
+		if len(p.Reused) != 0 || len(p.Invalidated) != len(order) {
+			return fmt.Errorf("full recompile plan must invalidate all %d segs and reuse none", len(order))
+		}
+	} else if p.Boundary != BoundaryNone {
+		return fmt.Errorf("incremental recompile plan unexpectedly names boundary %q", p.Boundary)
+	}
+	return nil
 }
 
 // String renders the plan as one line for logs and CLI output.
