@@ -46,7 +46,7 @@ func wireWizard(t *testing.T, deps *Deps) {
 		Script:     scriptagents.New(scriptagents.Options{Store: s, Termination: scriptagents.TerminationConfig{MaxRounds: 2}}),
 		Hybrid:     hybrid.New(hybrid.Options{Store: s}),
 		Compliance: comp,
-		Render:     render.New(render.Options{Store: s, Artifacts: s, OutputDir: t.TempDir(), FFmpeg: render.StubFFmpeg{}, Video: render.StubVideoGenerator{OutputDir: t.TempDir()}, Validator: render.StubOutputValidator{}}),
+		Render:     render.New(render.Options{Store: s, Artifacts: s, RecompileRuns: s, OutputDir: t.TempDir(), FFmpeg: render.StubFFmpeg{}, Video: render.StubVideoGenerator{OutputDir: t.TempDir()}, Validator: render.StubOutputValidator{}}),
 		Recompile:  recompile.New(recompile.Options{Cache: s, Runs: s}),
 	})
 }

@@ -43,13 +43,17 @@ const (
 // Its counters are seg totals rather than per-run averages; see
 // InvalidationRate for why.
 type Report struct {
-	Runs            int              `json:"runs"`
-	TotalSegs       int              `json:"total_segs"`
-	InvalidatedSegs int              `json:"invalidated_segs"`
-	ReusedSegs      int              `json:"reused_segs"`
-	FullRerunRuns   int              `json:"full_rerun_runs"`
-	CostSavedMicros int64            `json:"cost_saved_micros"`
-	ByBoundary      map[Boundary]int `json:"by_boundary,omitempty"`
+	Runs             int              `json:"runs"`
+	TotalSegs        int              `json:"total_segs"`
+	InvalidatedSegs  int              `json:"invalidated_segs"`
+	ReusedSegs       int              `json:"reused_segs"`
+	FullRerunRuns    int              `json:"full_rerun_runs"`
+	CostSavedMicros  int64            `json:"cost_saved_micros"`
+	CacheHits        int              `json:"cache_hits"`
+	RegeneratedSegs  int              `json:"regenerated_segs"`
+	ElapsedMS        int64            `json:"elapsed_ms"`
+	ActualCostMicros int64            `json:"actual_cost_micros"`
+	ByBoundary       map[Boundary]int `json:"by_boundary,omitempty"`
 }
 
 // Aggregate folds recorded runs into a report.
@@ -64,6 +68,10 @@ func Aggregate(runs []store.RecompileRun) Report {
 		r.InvalidatedSegs += run.InvalidatedSegs
 		r.ReusedSegs += run.TotalSegs - run.InvalidatedSegs
 		r.CostSavedMicros += run.CostSavedMicros
+		r.CacheHits += run.CacheHits
+		r.RegeneratedSegs += run.RegeneratedSegs
+		r.ElapsedMS += run.ElapsedMS
+		r.ActualCostMicros += run.ActualCostMicros
 		if run.FullRerun {
 			r.FullRerunRuns++
 		}

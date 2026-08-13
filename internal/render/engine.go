@@ -49,6 +49,7 @@ type RunResult struct {
 type Options struct {
 	Store         store.RenderStore
 	Artifacts     store.ArtifactStore
+	RecompileRuns store.RecompileRunStore
 	OutputDir     string
 	MediaDir      string
 	FFmpegBinary  string
@@ -67,19 +68,20 @@ type Options struct {
 
 // Engine runs the staged FFmpeg pipeline.
 type Engine struct {
-	store     store.RenderStore
-	artifacts store.ArtifactStore
-	outputDir string
-	ffmpeg    FFmpeg
-	validator OutputValidator
-	video     VideoGenerator
-	prompts   PromptGenerator
-	reporter  telemetry.Reporter
-	labels    label.Injector
-	audio     *audio.Engine
-	bgm       BGMMixer
-	mediaDir  string
-	stageHook func(stage string) error
+	store         store.RenderStore
+	artifacts     store.ArtifactStore
+	recompileRuns store.RecompileRunStore
+	outputDir     string
+	ffmpeg        FFmpeg
+	validator     OutputValidator
+	video         VideoGenerator
+	prompts       PromptGenerator
+	reporter      telemetry.Reporter
+	labels        label.Injector
+	audio         *audio.Engine
+	bgm           BGMMixer
+	mediaDir      string
+	stageHook     func(stage string) error
 }
 
 // New builds an Engine with production-safe defaults. Tests without real media
@@ -87,7 +89,7 @@ type Engine struct {
 // StubOutputValidator.
 func New(opts Options) *Engine {
 	e := &Engine{
-		store: opts.Store, artifacts: opts.Artifacts, outputDir: opts.OutputDir,
+		store: opts.Store, artifacts: opts.Artifacts, recompileRuns: opts.RecompileRuns, outputDir: opts.OutputDir,
 		ffmpeg: opts.FFmpeg, video: opts.Video, prompts: opts.Prompts,
 		validator: opts.Validator,
 		reporter:  opts.Reporter, stageHook: opts.StageHook, labels: opts.Labels,
@@ -122,6 +124,7 @@ func New(opts Options) *Engine {
 
 // Run executes the pipeline, optionally resuming from ResumeFrom.
 func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
+	startedAt := time.Now()
 	if e.store == nil {
 		return RunResult{}, ErrNoStore
 	}
@@ -314,6 +317,9 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
+	if err := e.recordRecompileExecution(ctx, req, time.Since(startedAt)); err != nil {
+		return RunResult{}, err
+	}
 
 	_ = telemetry.Report(ctx, e.reporter, "render.completed", map[string]any{
 		"run_id": req.RunID, "project_id": req.Project.ID,
@@ -498,9 +504,10 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 			key = model.ComputeRenderCacheKey(s, req.Project.RenderProfile)
 		}
 		var uri string
+		var generated GeneratedVideo
 		if _, ok := reused[s.SegID]; ok {
 			var err error
-			uri, err = e.reusableArtifactURI(ctx, s.SegID, key)
+			uri, err = e.reusableArtifactURI(ctx, s, key)
 			if err != nil {
 				return nil, err
 			}
@@ -510,7 +517,7 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 				return nil, fmt.Errorf("missing shared context for %s", key)
 			}
 			var err error
-			uri, err = e.video.Generate(ctx, VideoGenInput{
+			generated, err = e.video.Generate(ctx, VideoGenInput{
 				Resolution: req.Resolution, ProjectID: req.Project.ID, SegID: s.SegID,
 				Text: s.Text, DurationMS: s.DurationBudget.TargetMS(), RenderCacheKey: key,
 				Prompt: vis.Prompt, Seed: vis.Seed, RefURI: vis.RefURI,
@@ -518,6 +525,7 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 			if err != nil {
 				return nil, err
 			}
+			uri = generated.URI
 		}
 		files = append(files, uri)
 		rec := store.RenderSegArtifact{
@@ -530,8 +538,9 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 		if _, ok := reused[s.SegID]; !ok && e.artifacts != nil {
 			if err := e.artifacts.PutArtifact(ctx, store.Artifact{
 				RenderCacheKey: key,
-				DurationMS:     s.DurationBudget.TargetMS(),
+				DurationMS:     generated.DurationMS,
 				URI:            uri,
+				CostMicros:     generated.CostMicros,
 			}); err != nil {
 				return nil, err
 			}
@@ -540,13 +549,18 @@ func (e *Engine) runVisuals(ctx context.Context, req RunRequest, shared []Shared
 	return files, nil
 }
 
-func (e *Engine) reusableArtifactURI(ctx context.Context, segID, key string) (string, error) {
+func (e *Engine) reusableArtifactURI(ctx context.Context, seg model.Seg, key string) (string, error) {
+	segID := seg.SegID
 	if e.artifacts == nil {
 		return "", fmt.Errorf("%w for seg %s: artifact store is not configured", ErrReusableArtifactUnavailable, segID)
 	}
 	artifact, err := e.artifacts.Artifact(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("%w for seg %s (%s): %v", ErrReusableArtifactUnavailable, segID, key, err)
+	}
+	if !seg.CanReuse(artifact.RenderCacheKey, artifact.DurationMS) {
+		return "", fmt.Errorf("%w for seg %s (%s): cached key or duration %dms no longer satisfies budget [%d,%d]",
+			ErrReusableArtifactUnavailable, segID, key, artifact.DurationMS, seg.DurationBudget.MinMS, seg.DurationBudget.MaxMS)
 	}
 	uri := strings.TrimSpace(artifact.URI)
 	if uri == "" {
@@ -560,6 +574,26 @@ func (e *Engine) reusableArtifactURI(ctx context.Context, segID, key string) (st
 		return "", fmt.Errorf("%w for seg %s (%s): URI is not a regular file", ErrReusableArtifactUnavailable, segID, key)
 	}
 	return uri, nil
+}
+
+func (e *Engine) recordRecompileExecution(ctx context.Context, req RunRequest, elapsed time.Duration) error {
+	if req.RecompilePlan == nil || req.RecompilePlan.RunID == "" || e.recompileRuns == nil {
+		return nil
+	}
+	var actualCost int64
+	for _, segID := range req.RecompilePlan.Invalidated {
+		seg, ok := req.Project.Seg(segID)
+		if !ok {
+			continue
+		}
+		artifact, err := e.artifacts.Artifact(ctx, seg.RenderCacheKey)
+		if err != nil {
+			return fmt.Errorf("read generated artifact cost for seg %s: %w", segID, err)
+		}
+		actualCost += artifact.CostMicros
+	}
+	return e.recompileRuns.RecordRecompileExecution(ctx, req.RecompilePlan.RunID,
+		len(req.RecompilePlan.Reused), len(req.RecompilePlan.Invalidated), elapsed.Milliseconds(), actualCost)
 }
 
 func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.RenderRunRecord, error) {

@@ -50,36 +50,36 @@ var (
 
 // Generate renders one segment atomically. A repeated call safely replaces the
 // prior output, so changing a local source never serves stale frames.
-func (g FFmpegVideoGenerator) Generate(ctx context.Context, in VideoGenInput) (string, error) {
+func (g FFmpegVideoGenerator) Generate(ctx context.Context, in VideoGenInput) (GeneratedVideo, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return GeneratedVideo{}, err
 	}
 	if strings.TrimSpace(g.OutputDir) == "" {
-		return "", errors.New("video output dir is not configured")
+		return GeneratedVideo{}, errors.New("video output dir is not configured")
 	}
 	if in.DurationMS <= 0 {
-		return "", fmt.Errorf("segment %s duration must be positive", in.SegID)
+		return GeneratedVideo{}, fmt.Errorf("segment %s duration must be positive", in.SegID)
 	}
 	w, h := in.Resolution.Dimensions()
 	outDir := filepath.Join(g.OutputDir, safeFilename(in.ProjectID), "visuals")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return "", fmt.Errorf("create visual output directory: %w", err)
+		return GeneratedVideo{}, fmt.Errorf("create visual output directory: %w", err)
 	}
 	outPath := filepath.Join(outDir, safeFilename(in.RenderCacheKey)+"_"+strconv.Itoa(w)+"x"+strconv.Itoa(h)+".mp4")
 	tmp, err := os.CreateTemp(outDir, ".visual-*.mp4")
 	if err != nil {
-		return "", fmt.Errorf("create temporary visual: %w", err)
+		return GeneratedVideo{}, fmt.Errorf("create temporary visual: %w", err)
 	}
 	tmpPath := tmp.Name()
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("close temporary visual: %w", err)
+		return GeneratedVideo{}, fmt.Errorf("close temporary visual: %w", err)
 	}
 	defer os.Remove(tmpPath)
 
 	source, kind, err := g.resolveSource(in)
 	if err != nil {
-		return "", err
+		return GeneratedVideo{}, err
 	}
 	args := g.arguments(in, source, kind, w, h, tmpPath)
 	binary := strings.TrimSpace(g.Binary)
@@ -91,22 +91,44 @@ func (g FFmpegVideoGenerator) Generate(ctx context.Context, in VideoGenInput) (s
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return "", fmt.Errorf("ffmpeg visual interrupted: %w", ctxErr)
+			return GeneratedVideo{}, fmt.Errorf("ffmpeg visual interrupted: %w", ctxErr)
 		}
 		message := strings.TrimSpace(stderr.String())
 		if len(message) > 8*1024 {
 			message = message[len(message)-8*1024:]
 		}
-		return "", fmt.Errorf("render visual for seg %s: %w: %s", in.SegID, err, message)
+		return GeneratedVideo{}, fmt.Errorf("render visual for seg %s: %w: %s", in.SegID, err, message)
 	}
 	info, err := os.Stat(tmpPath)
 	if err != nil || info.Size() == 0 {
-		return "", fmt.Errorf("ffmpeg produced no visual for seg %s", in.SegID)
+		return GeneratedVideo{}, fmt.Errorf("ffmpeg produced no visual for seg %s", in.SegID)
 	}
 	if err := os.Rename(tmpPath, outPath); err != nil {
-		return "", fmt.Errorf("publish visual for seg %s: %w", in.SegID, err)
+		return GeneratedVideo{}, fmt.Errorf("publish visual for seg %s: %w", in.SegID, err)
 	}
-	return outPath, nil
+	actualDurationMS, err := probeVideoDurationMS(ctx, binary, outPath)
+	if err != nil {
+		return GeneratedVideo{}, fmt.Errorf("measure visual for seg %s: %w", in.SegID, err)
+	}
+	return GeneratedVideo{URI: outPath, DurationMS: actualDurationMS}, nil
+}
+
+func probeVideoDurationMS(ctx context.Context, ffmpegBinary, path string) (int64, error) {
+	ffprobe := "ffprobe"
+	if strings.TrimSpace(ffmpegBinary) != "" {
+		ffprobe = filepath.Join(filepath.Dir(ffmpegBinary), "ffprobe")
+	}
+	cmd := exec.CommandContext(ctx, ffprobe, "-v", "error", "-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	seconds, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || seconds <= 0 {
+		return 0, fmt.Errorf("invalid ffprobe duration %q", strings.TrimSpace(string(out)))
+	}
+	return int64(seconds*1000 + 0.5), nil
 }
 
 type localMediaKind int
@@ -215,7 +237,15 @@ func motionColor(seed string) string {
 // VideoGenerator produces per-seg visual clips. The 1080p pass reuses stored
 // shared context and must not invoke LLM-backed prompt generation.
 type VideoGenerator interface {
-	Generate(ctx context.Context, in VideoGenInput) (uri string, err error)
+	Generate(ctx context.Context, in VideoGenInput) (GeneratedVideo, error)
+}
+
+// GeneratedVideo contains measured provider output. Local FFmpeg generation
+// costs no provider credits; paid adapters populate CostMicros from receipts.
+type GeneratedVideo struct {
+	URI        string
+	DurationMS int64
+	CostMicros int64
 }
 
 // StubVideoGenerator writes deterministic stub clip paths.
@@ -223,14 +253,14 @@ type StubVideoGenerator struct {
 	OutputDir string
 }
 
-func (g StubVideoGenerator) Generate(_ context.Context, in VideoGenInput) (string, error) {
+func (g StubVideoGenerator) Generate(_ context.Context, in VideoGenInput) (GeneratedVideo, error) {
 	w, h := in.Resolution.Dimensions()
 	name := safeFilename(in.RenderCacheKey) + "_" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ".clip"
 	path := filepath.Join(g.OutputDir, name)
 	if err := writeStubFile(path, in.Seed); err != nil {
-		return "", err
+		return GeneratedVideo{}, err
 	}
-	return path, nil
+	return GeneratedVideo{URI: path, DurationMS: in.DurationMS}, nil
 }
 
 // CountingVideoGenerator wraps another generator for test assertions.
@@ -239,7 +269,7 @@ type CountingVideoGenerator struct {
 	Calls int
 }
 
-func (c *CountingVideoGenerator) Generate(ctx context.Context, in VideoGenInput) (string, error) {
+func (c *CountingVideoGenerator) Generate(ctx context.Context, in VideoGenInput) (GeneratedVideo, error) {
 	c.Calls++
 	return c.Inner.Generate(ctx, in)
 }

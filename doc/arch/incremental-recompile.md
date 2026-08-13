@@ -138,7 +138,8 @@ run 记录**落库**而不是内存计数。这个问题需要几周的真实编
 ```
 artifacts(render_cache_key PK, duration_ms, uri, cost_micros, created_at)
 recompile_runs(id PK, project_id, planned_at, total_segs, invalidated_segs,
-               full_rerun, boundary, cost_saved_micros)
+               full_rerun, boundary, cost_saved_micros, cache_hits,
+               regenerated_segs, elapsed_ms, actual_cost_micros)
 ```
 
 `artifacts` 以 `render_cache_key` 为主键而不是 seg id——两个 seg 共用一份产物正是把
@@ -147,8 +148,13 @@ recompile_runs(id PK, project_id, planned_at, total_segs, invalidated_segs,
 
 `duration_ms` 必须为正。零或负数会通过每一道从零开始的预算检查，等于给一份坏产物发放复用许可。
 
-`recompile_runs` 只记 `cost_saved_micros`，不记「花掉的成本」——渲染器还不存在，
-写一个花费字段就是写一个恒为零的字段。
+规划器先按稳定 run id 写入计划指标；渲染器完成后用同一 id 回填实际缓存命中数、重生成数、
+墙钟耗时和 provider 回执中的真实成本。重试是覆盖而不是追加，避免同一次编辑重复计数。
+本地 FFmpeg 不产生 provider 费用，成本为零；付费生成 adapter 必须从供应商回执填入
+`actual_cost_micros`，不能用预算或报价冒充实际支出。
+
+artifact 的 `duration_ms` 来自产物探测（本地 FFmpeg 使用 FFprobe），不能把预算中点当作实际时长。
+即使规划已命中缓存，执行器仍会在读文件前再次校验 key 与实际时长，防止计划和执行之间缓存被替换。
 
 ## 接口
 
@@ -183,8 +189,7 @@ v2 加了三个字段（seg 的 `continuity_group`、`generation_batch`，render
 ## 明确不做
 
 - **自动调阈值**。40% 和 20 是写死的常量。能自适应的阈值等于没有阈值。
-- **失效率之外的成本模型**。当前尚未持久化本次执行的真实开销，`cost_saved_micros` 完全来自
-  `artifacts` 里记录的历史值。
+- **预测成本模型**。只持久化 provider 回执中的实际成本；不从时长、报价或预算推算支出。
 - **边界的可配置化**。六条边界现在是代码里的六个函数。在有数据说明哪条画得太宽之前
   就做成配置项，是把「我们不知道」包装成「你自己选」。
 - **产物的垃圾回收**。`artifacts` 只增不减。第一次撑爆磁盘之前，任何回收策略都是猜的。

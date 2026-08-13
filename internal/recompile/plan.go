@@ -64,6 +64,9 @@ const DurationDriftPercent = 15
 // Plan is what one edit costs: which segs have to be produced again and which
 // can be taken from cache.
 type Plan struct {
+	// RunID ties the plan to its eventual execution metrics. It is empty for
+	// ad-hoc callers that do not persist measurements.
+	RunID     string
 	ProjectID string
 	// FullRerun means a boundary forced the entire project to be produced
 	// again.

@@ -49,14 +49,17 @@ func TestFFmpegVideoGeneratorRendersLocalMediaAndMotionGraphics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			path, err := generator.Generate(ctx, render.VideoGenInput{
+			generated, err := generator.Generate(ctx, render.VideoGenInput{
 				Resolution: render.Resolution720p, ProjectID: "project", SegID: tt.seg,
 				Text: "A useful visual", DurationMS: 450, RenderCacheKey: tt.key, Seed: "seed",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			probeVisual(t, ffprobe, path, 1280, 720, 0.45)
+			if generated.DurationMS < 400 || generated.DurationMS > 500 {
+				t.Fatalf("measured duration=%dms, want about 450ms", generated.DurationMS)
+			}
+			probeVisual(t, ffprobe, generated.URI, 1280, 720, 0.45)
 		})
 	}
 }
@@ -72,7 +75,7 @@ func TestFFmpegVideoGeneratorAcceptsExplicitFileURI(t *testing.T) {
 	generator := render.FFmpegVideoGenerator{Binary: ffmpeg, OutputDir: filepath.Join(dir, "output")}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	path, err := generator.Generate(ctx, render.VideoGenInput{
+	generated, err := generator.Generate(ctx, render.VideoGenInput{
 		Resolution: render.Resolution720p, ProjectID: "project", SegID: "seg",
 		Text: "text", DurationMS: 200, RenderCacheKey: "rk2:file-uri",
 		RefURI: "file://" + filepath.ToSlash(imagePath),
@@ -80,7 +83,7 @@ func TestFFmpegVideoGeneratorAcceptsExplicitFileURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+	if info, err := os.Stat(generated.URI); err != nil || info.Size() == 0 {
 		t.Fatalf("generated visual is missing or empty: info=%v err=%v", info, err)
 	}
 }

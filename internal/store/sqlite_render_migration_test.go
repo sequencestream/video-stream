@@ -51,3 +51,34 @@ func TestRenderSubtitleMigrationUpgradesExistingDatabase(t *testing.T) {
 		t.Fatalf("legacy BGM defaults=%+v", run)
 	}
 }
+
+func TestRecompileMetricsMigrationUpgradesExistingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE recompile_runs (
+		id TEXT PRIMARY KEY, project_id TEXT NOT NULL, planned_at INTEGER NOT NULL,
+		total_segs INTEGER NOT NULL, invalidated_segs INTEGER NOT NULL,
+		full_rerun INTEGER NOT NULL DEFAULT 0, boundary TEXT NOT NULL DEFAULT '',
+		cost_saved_micros INTEGER NOT NULL DEFAULT 0
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, column := range []string{"cache_hits", "regenerated_segs", "elapsed_ms", "actual_cost_micros"} {
+		exists, err := sqliteColumnExists(s.db, "recompile_runs", column)
+		if err != nil || !exists {
+			t.Fatalf("column %s: exists=%v err=%v", column, exists, err)
+		}
+	}
+}
