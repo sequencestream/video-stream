@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/render"
 )
 
@@ -25,6 +26,73 @@ func TestExecFFmpegRequiresVideo(t *testing.T) {
 	err := (render.ExecFFmpeg{}).Mux(context.Background(), filepath.Join(dir, "out.mp4"), []string{audioPath}, render.MuxPlan{})
 	if err == nil || !strings.Contains(err.Error(), "at least one video") {
 		t.Fatalf("got %v, want missing video error", err)
+	}
+}
+
+func TestExecFFmpegBurnInRequiresSubtitleInput(t *testing.T) {
+	dir := t.TempDir()
+	videoPath := filepath.Join(dir, "input.mp4")
+	if err := os.WriteFile(videoPath, []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := (render.ExecFFmpeg{}).Mux(t.Context(), filepath.Join(dir, "out.mp4"), []string{videoPath}, render.MuxPlan{
+		Width: 320, Height: 180, FPS: 25, ClipDurations: []time.Duration{time.Second}, SubtitleMode: audio.SubtitleBurnIn,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires a WebVTT or SRT input") {
+		t.Fatalf("got %v, want missing burn-in subtitle error", err)
+	}
+}
+
+func TestExecFFmpegBurnsInSubtitlesWithoutSubtitleTrack(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	filters, err := exec.Command(ffmpeg, "-hide_banner", "-filters").CombinedOutput()
+	if err != nil || !strings.Contains(string(filters), " subtitles ") {
+		t.Skip("ffmpeg was built without the subtitles/libass filter")
+	}
+	dir := t.TempDir()
+	clip := filepath.Join(dir, "clip.mp4")
+	subtitle := filepath.Join(dir, "caption.vtt")
+	output := filepath.Join(dir, "burned.mp4")
+	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=1:r=25", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", clip)
+	if combined, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("create video fixture: %v: %s", runErr, combined)
+	}
+	if err := os.WriteFile(subtitle, []byte("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nBURNED TEXT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (render.ExecFFmpeg{Binary: ffmpeg}).Mux(t.Context(), output, []string{clip, subtitle}, render.MuxPlan{
+		Width: 320, Height: 180, FPS: 25, ClipDurations: []time.Duration{time.Second},
+		SubtitleMode: audio.SubtitleBurnIn,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := exec.Command(ffprobe, "-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", output).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(probe)) != "" {
+		t.Fatalf("burn-in output unexpectedly contains a subtitle stream: %s", probe)
+	}
+	frame, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", "0.5", "-i", output,
+		"-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bright := 0
+	for _, pixel := range frame {
+		if pixel > 80 {
+			bright++
+		}
+	}
+	if bright < 20 {
+		t.Fatalf("only %d bright pixels; subtitle text was not burned into the black frame", bright)
 	}
 }
 

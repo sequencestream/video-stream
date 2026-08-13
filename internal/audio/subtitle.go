@@ -3,18 +3,19 @@ package audio
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sequencestream/video-stream/internal/model"
 )
 
 // PlatformSpec defines subtitle and loudness targets per distribution platform.
 type PlatformSpec struct {
-	Platform       string  `json:"platform"`
-	TargetLUFS     float64 `json:"target_lufs"`
-	LUFSTolerance  float64 `json:"lufs_tolerance"`
-	MaxCharsPerLine int    `json:"max_chars_per_line"`
-	FontFamily     string  `json:"font_family"`
-	PreferredMode  SubtitleMode `json:"preferred_mode"`
+	Platform        string       `json:"platform"`
+	TargetLUFS      float64      `json:"target_lufs"`
+	LUFSTolerance   float64      `json:"lufs_tolerance"`
+	MaxCharsPerLine int          `json:"max_chars_per_line"`
+	FontFamily      string       `json:"font_family"`
+	PreferredMode   SubtitleMode `json:"preferred_mode"`
 }
 
 // DefaultPlatformSpecs returns MVP defaults.
@@ -41,25 +42,26 @@ func SegmentSubtitle(seg model.Seg, tokens []model.Token, spec PlatformSpec) []s
 	if len(tokens) == 0 {
 		return nil
 	}
-	breaks := seg.SubtitleBreaks
-	if len(breaks) == 0 {
-		text := strings.Join(tokenTexts(tokens), " ")
-		return wrapLines(text, spec.MaxCharsPerLine)
+	text := strings.TrimSpace(seg.Text)
+	if text == "" {
+		text = strings.Join(tokenTexts(tokens), " ")
 	}
+	breaks := seg.SubtitleBreaks
 	var lines []string
-	start := 0
+	startRune := 0
+	runes := []rune(text)
 	for _, br := range breaks {
-		if br > len(tokens) {
+		if br > len(runes) {
 			break
 		}
-		chunk := strings.Join(tokenTexts(tokens[start:br]), " ")
+		chunk := strings.TrimSpace(string(runes[startRune:br]))
 		if chunk != "" {
-			lines = append(lines, chunk)
+			lines = append(lines, wrapLines(chunk, spec.MaxCharsPerLine)...)
 		}
-		start = br
+		startRune = br
 	}
-	if start < len(tokens) {
-		lines = append(lines, strings.Join(tokenTexts(tokens[start:]), " "))
+	if startRune < len(runes) {
+		lines = append(lines, wrapLines(strings.TrimSpace(string(runes[startRune:])), spec.MaxCharsPerLine)...)
 	}
 	return lines
 }
@@ -73,17 +75,26 @@ func tokenTexts(tokens []model.Token) []string {
 }
 
 func wrapLines(text string, max int) []string {
-	if max <= 0 || len(text) <= max {
+	if max <= 0 || utf8.RuneCountInString(text) <= max {
 		return []string{text}
 	}
 	words := strings.Fields(text)
+	if len(words) <= 1 {
+		return wrapRunes(text, max)
+	}
 	var lines []string
 	var cur string
 	for _, w := range words {
 		next := strings.TrimSpace(cur + " " + w)
-		if len(next) > max && cur != "" {
+		if utf8.RuneCountInString(next) > max && cur != "" {
 			lines = append(lines, cur)
-			cur = w
+			if utf8.RuneCountInString(w) > max {
+				wrapped := wrapRunes(w, max)
+				lines = append(lines, wrapped[:len(wrapped)-1]...)
+				cur = wrapped[len(wrapped)-1]
+			} else {
+				cur = w
+			}
 		} else {
 			cur = next
 		}
@@ -94,10 +105,30 @@ func wrapLines(text string, max int) []string {
 	return lines
 }
 
+func wrapRunes(text string, max int) []string {
+	runes := []rune(text)
+	var lines []string
+	for len(runes) > max {
+		lines = append(lines, string(runes[:max]))
+		runes = runes[max:]
+	}
+	if len(runes) > 0 {
+		lines = append(lines, string(runes))
+	}
+	return lines
+}
+
 // FormatWebVTT renders soft subtitle cues.
 func FormatWebVTT(segID string, lines []string, startMS, endMS int64) string {
-	return fmt.Sprintf("WEBVTT\n\n%s --> %s\n%s\n",
-		formatTS(startMS), formatTS(endMS), strings.Join(lines, "\n"))
+	if len(lines) == 0 || endMS <= startMS {
+		return ""
+	}
+	identifier := ""
+	if strings.TrimSpace(segID) != "" {
+		identifier = strings.TrimSpace(segID) + "\n"
+	}
+	return fmt.Sprintf("%s%s --> %s\n%s\n",
+		identifier, formatTS(startMS), formatTS(endMS), strings.Join(lines, "\n"))
 }
 
 func formatTS(ms int64) string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/render"
 	"github.com/sequencestream/video-stream/internal/store"
@@ -37,10 +38,13 @@ func RenderHandler(engine *render.Engine, projects store.ProjectStore) queue.Han
 		includeBGM, _ := t.Payload["include_bgm"].(bool)
 		resumeFrom, _ := t.Payload["resume_from"].(string)
 		runID, _ := t.Payload["run_id"].(string)
+		platform, _ := t.Payload["platform"].(string)
+		subtitleMode, _ := t.Payload["subtitle_mode"].(string)
 
 		result, err := engine.Run(ctx, render.RunRequest{
 			RunID: runID, Project: project, Resolution: res,
 			Finalized: finalized, IncludeBGM: includeBGM, ResumeFrom: resumeFrom,
+			Platform: platform, SubtitleMode: audio.SubtitleMode(subtitleMode),
 		})
 		if err != nil {
 			return nil, err

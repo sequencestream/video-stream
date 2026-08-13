@@ -31,7 +31,9 @@ credential chain，不落盘明文。
 | douyin | -16 ±0.5 | 18 | burn_in |
 | bilibili | -14 ±0.5 | 36 | soft |
 
-软字幕输出 `subs.vtt`；烧录 fallback 输出 `subs-burned.mp4` stub（V2 接 FFmpeg drawtext）。
+字幕阶段统一输出有效的 `subs.vtt`。`soft` 模式在最终 MP4 中封装为 `mov_text` 字幕轨；
+`burn_in` 模式使用 FFmpeg `subtitles`/libass 滤镜烧入最终画面，不再保留独立字幕轨。
+运行环境必须提供 libass 字幕滤镜和覆盖目标语言的字体；官方镜像安装 Noto CJK 字体。
 
 ## HTTP
 
@@ -45,5 +47,7 @@ GET  /v1/audio/platforms
 ## Render 接入
 
 `audio` / `subtitles` / `loudness` stage 调用 `internal/audio.Engine`，产物写入 `{output_dir}/{project_id}/{run_id}/`。
+渲染请求可传 `platform` 和 `subtitle_mode`；未传模式时采用平台默认值。相同 `run_id` 不允许
+更换平台或字幕模式后续跑，防止错误复用旧产物。
 
 Sidecar ASR / 降噪契约见 [sidecar-audio.md](./sidecar-audio.md)（V2，MVP 不实现）。

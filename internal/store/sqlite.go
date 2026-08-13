@@ -220,6 +220,8 @@ CREATE TABLE IF NOT EXISTS render_runs (
 	id                   TEXT PRIMARY KEY,
 	project_id           TEXT NOT NULL,
 	resolution           TEXT NOT NULL,
+	platform             TEXT NOT NULL DEFAULT 'youtube',
+	subtitle_mode        TEXT NOT NULL DEFAULT 'soft',
 	status               TEXT NOT NULL,
 	finalized            INTEGER NOT NULL DEFAULT 0,
 	last_completed_stage TEXT NOT NULL DEFAULT '',
@@ -342,7 +344,20 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 }
 
 func applySQLiteMigrations(db *sql.DB) error {
-	const name = "001_wizard_operation_journal"
+	if err := applyColumnMigration(db, "001_wizard_operation_journal", "wizard_sessions", []struct{ name, ddl string }{
+		{"version", `ALTER TABLE wizard_sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 1`},
+		{"active_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN active_operation_id TEXT NOT NULL DEFAULT ''`},
+		{"failed_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN failed_operation_id TEXT NOT NULL DEFAULT ''`},
+	}); err != nil {
+		return err
+	}
+	return applyColumnMigration(db, "002_render_subtitle_delivery", "render_runs", []struct{ name, ddl string }{
+		{"platform", `ALTER TABLE render_runs ADD COLUMN platform TEXT NOT NULL DEFAULT 'youtube'`},
+		{"subtitle_mode", `ALTER TABLE render_runs ADD COLUMN subtitle_mode TEXT NOT NULL DEFAULT 'soft'`},
+	})
+}
+
+func applyColumnMigration(db *sql.DB, name, table string, columns []struct{ name, ddl string }) error {
 	var applied int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name=?`, name).Scan(&applied); err != nil {
 		return err
@@ -350,13 +365,8 @@ func applySQLiteMigrations(db *sql.DB) error {
 	if applied != 0 {
 		return nil
 	}
-	columns := []struct{ name, ddl string }{
-		{"version", `ALTER TABLE wizard_sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 1`},
-		{"active_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN active_operation_id TEXT NOT NULL DEFAULT ''`},
-		{"failed_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN failed_operation_id TEXT NOT NULL DEFAULT ''`},
-	}
 	for _, column := range columns {
-		exists, err := sqliteColumnExists(db, "wizard_sessions", column.name)
+		exists, err := sqliteColumnExists(db, table, column.name)
 		if err != nil {
 			return err
 		}

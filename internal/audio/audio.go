@@ -16,6 +16,8 @@ var (
 	ErrNeedsWordCountChange = errors.New("tts duration outside budget; revise word count")
 	// ErrNoStore is returned when persistence is not configured.
 	ErrNoStore = errors.New("audio has no store configured")
+	// ErrInvalidSubtitleMode rejects modes that cannot be delivered by FFmpeg.
+	ErrInvalidSubtitleMode = errors.New("subtitle mode must be soft or burn_in")
 )
 
 // SubtitleMode selects soft captions vs burned-in fallback.
@@ -25,3 +27,11 @@ const (
 	SubtitleSoft   SubtitleMode = "soft"
 	SubtitleBurnIn SubtitleMode = "burn_in"
 )
+
+// Validate checks that the requested subtitle delivery mode is supported.
+func (m SubtitleMode) Validate() error {
+	if m != SubtitleSoft && m != SubtitleBurnIn {
+		return ErrInvalidSubtitleMode
+	}
+	return nil
+}

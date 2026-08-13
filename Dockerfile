@@ -42,7 +42,7 @@ FROM alpine:3.22
 
 # wget backs the compose healthcheck, ffmpeg renders the final media, and
 # ca-certificates is needed once providers are called over TLS.
-RUN apk add --no-cache ca-certificates ffmpeg py3-pip wget \
+RUN apk add --no-cache ca-certificates ffmpeg font-noto-cjk py3-pip wget \
  && pip3 install --no-cache-dir --break-system-packages edge-tts==7.2.8 \
  && adduser -D -u 10001 app
 
