@@ -200,7 +200,22 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	}
 
 	outPath := filepath.Join(e.outputDir, req.Project.ID, string(req.Resolution)+".mp4")
-	if err := e.ffmpeg.Mux(ctx, outPath, stageFiles); err != nil {
+	width, height := req.Resolution.Dimensions()
+	durations := make([]time.Duration, len(req.Project.Segs))
+	for i, seg := range req.Project.Segs {
+		durations[i] = time.Duration(seg.DurationBudget.TargetMS()) * time.Millisecond
+	}
+	transition := 250 * time.Millisecond
+	for _, duration := range durations {
+		if duration <= transition {
+			transition = 0
+			break
+		}
+	}
+	if err := e.ffmpeg.Mux(ctx, outPath, stageFiles, MuxPlan{
+		Width: width, Height: height, FPS: 30,
+		ClipDurations: durations, TransitionDuration: transition,
+	}); err != nil {
 		run.Status = "failed"
 		run.Error = err.Error()
 		_ = e.store.UpdateRenderRun(ctx, run)
