@@ -5,17 +5,20 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/model"
 	"github.com/sequencestream/video-stream/internal/render"
 )
 
 type renderRunRequest struct {
-	Project    model.Project `json:"project"`
-	Resolution string        `json:"resolution"`
-	Finalized  bool          `json:"finalized"`
-	IncludeBGM bool          `json:"include_bgm"`
-	ResumeFrom string        `json:"resume_from,omitempty"`
-	RunID      string        `json:"run_id,omitempty"`
+	Project      model.Project      `json:"project"`
+	Resolution   string             `json:"resolution"`
+	Finalized    bool               `json:"finalized"`
+	IncludeBGM   bool               `json:"include_bgm"`
+	ResumeFrom   string             `json:"resume_from,omitempty"`
+	RunID        string             `json:"run_id,omitempty"`
+	Platform     string             `json:"platform,omitempty"`
+	SubtitleMode audio.SubtitleMode `json:"subtitle_mode,omitempty"`
 }
 
 func (s *Server) handleRenderRun(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +44,7 @@ func (s *Server) handleRenderRun(w http.ResponseWriter, r *http.Request) {
 	result, err := s.deps.Render.Run(r.Context(), render.RunRequest{
 		RunID: req.RunID, Project: req.Project, Resolution: res,
 		Finalized: req.Finalized, IncludeBGM: req.IncludeBGM, ResumeFrom: req.ResumeFrom,
+		Platform: req.Platform, SubtitleMode: req.SubtitleMode,
 	})
 	if errors.Is(err, render.ErrNotFinalized) || errors.Is(err, render.ErrPreviewRequired) {
 		writeError(w, r, http.StatusUnprocessableEntity, "render_rejected", err.Error())

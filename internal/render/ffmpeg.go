@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sequencestream/video-stream/internal/audio"
 )
 
 // FFmpeg muxes staged outputs into the final MP4.
@@ -27,6 +29,7 @@ type MuxPlan struct {
 	FPS                int
 	ClipDurations      []time.Duration
 	TransitionDuration time.Duration
+	SubtitleMode       audio.SubtitleMode
 }
 
 // ExecFFmpeg invokes the local ffmpeg binary. Binary defaults to "ffmpeg" and
@@ -52,6 +55,15 @@ func (f ExecFFmpeg) Mux(ctx context.Context, outputPath string, stageFiles []str
 	}
 	if len(inputs.videos) == 0 {
 		return errors.New("ffmpeg mux requires at least one video input")
+	}
+	if plan.SubtitleMode == "" {
+		plan.SubtitleMode = audio.SubtitleSoft
+	}
+	if err := plan.SubtitleMode.Validate(); err != nil {
+		return err
+	}
+	if plan.SubtitleMode == audio.SubtitleBurnIn && inputs.subtitle == "" {
+		return errors.New("ffmpeg subtitle burn-in requires a WebVTT or SRT input")
 	}
 	if strings.TrimSpace(outputPath) == "" {
 		return errors.New("ffmpeg output path is required")
@@ -198,11 +210,15 @@ func buildFFmpegArgs(inputs ffmpegInputs, plan MuxPlan, outputPath string) []str
 	}
 
 	filter := buildVideoFilter(len(inputs.videos), plan)
+	if inputs.subtitle != "" && plan.SubtitleMode == audio.SubtitleBurnIn {
+		filter = strings.Replace(filter, "[vout]", "[vbase]", 1)
+		filter += ";[vbase]subtitles=filename='" + escapeFilterValue(inputs.subtitle) + "'[vout]"
+	}
 	args = append(args, "-filter_complex", filter, "-map", "[vout]")
 	if audioIndex >= 0 {
 		args = append(args, "-map", fmt.Sprintf("%d:a:0", audioIndex), "-c:a", "aac", "-b:a", "192k")
 	}
-	if subtitleIndex >= 0 {
+	if subtitleIndex >= 0 && plan.SubtitleMode != audio.SubtitleBurnIn {
 		args = append(args, "-map", fmt.Sprintf("%d:0", subtitleIndex), "-c:s", "mov_text", "-metadata:s:s:0", "language=und")
 	}
 	args = append(args,
@@ -215,6 +231,13 @@ func buildFFmpegArgs(inputs ffmpegInputs, plan MuxPlan, outputPath string) []str
 	}
 	args = append(args, "-t", formatFFmpegDuration(timelineDuration))
 	return append(args, outputPath)
+}
+
+func escapeFilterValue(value string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`, `'`, `\'`, `:`, `\:`, `,`, `\,`, `[`, `\[`, `]`, `\]`, `;`, `\;`,
+	)
+	return replacer.Replace(value)
 }
 
 func buildVideoFilter(videoCount int, plan MuxPlan) string {

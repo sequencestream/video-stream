@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sequencestream/video-stream/internal/audio"
 	"github.com/sequencestream/video-stream/internal/label"
 	"github.com/sequencestream/video-stream/internal/model"
 	"github.com/sequencestream/video-stream/internal/render"
@@ -162,6 +164,29 @@ func TestCompletedRunIsReturnedWithoutExecutingStagesAgain(t *testing.T) {
 	}
 	if second.OutputURI != first.OutputURI {
 		t.Fatalf("output=%q want %q", second.OutputURI, first.OutputURI)
+	}
+}
+
+func TestRunPersistsSubtitleDeliveryAndRejectsModeChange(t *testing.T) {
+	ctx := context.Background()
+	eng := openEngine(t, render.Options{})
+	req := render.RunRequest{
+		Project: sampleProject(t), Resolution: render.Resolution720p, RunID: "run-subtitles",
+		Platform: "douyin", SubtitleMode: audio.SubtitleBurnIn,
+	}
+	if _, err := eng.Run(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := eng.GetRun(ctx, req.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Platform != "douyin" || run.SubtitleMode != "burn_in" {
+		t.Fatalf("stored subtitle delivery=%s/%s", run.Platform, run.SubtitleMode)
+	}
+	req.SubtitleMode = audio.SubtitleSoft
+	if _, err := eng.Run(ctx, req); err == nil || !strings.Contains(err.Error(), "different render request") {
+		t.Fatalf("mode-changing resume err=%v", err)
 	}
 }
 

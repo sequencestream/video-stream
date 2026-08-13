@@ -21,9 +21,9 @@ func (s *SQLiteStore) CreateRenderRun(ctx context.Context, run RenderRunRecord) 
 		finalized = 1
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO render_runs (id, project_id, resolution, status, finalized, last_completed_stage, output_uri, error, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.ProjectID, run.Resolution, run.Status, finalized,
+		`INSERT INTO render_runs (id, project_id, resolution, platform, subtitle_mode, status, finalized, last_completed_stage, output_uri, error, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.ProjectID, run.Resolution, run.Platform, run.SubtitleMode, run.Status, finalized,
 		run.LastCompletedStage, run.OutputURI, run.Error, now)
 	return err
 }
@@ -34,9 +34,9 @@ func (s *SQLiteStore) UpdateRenderRun(ctx context.Context, run RenderRunRecord) 
 		finalized = 1
 	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE render_runs SET status=?, finalized=?, last_completed_stage=?, output_uri=?, error=?, updated_at=?
+		`UPDATE render_runs SET platform=?, subtitle_mode=?, status=?, finalized=?, last_completed_stage=?, output_uri=?, error=?, updated_at=?
 		 WHERE id=?`,
-		run.Status, finalized, run.LastCompletedStage, run.OutputURI, run.Error,
+		run.Platform, run.SubtitleMode, run.Status, finalized, run.LastCompletedStage, run.OutputURI, run.Error,
 		time.Now().UTC().UnixMilli(), run.ID)
 	if err != nil {
 		return err
@@ -53,9 +53,9 @@ func (s *SQLiteStore) GetRenderRun(ctx context.Context, runID string) (RenderRun
 	var finalized int
 	var updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, project_id, resolution, status, finalized, last_completed_stage, output_uri, error, updated_at
+		`SELECT id, project_id, resolution, platform, subtitle_mode, status, finalized, last_completed_stage, output_uri, error, updated_at
 		 FROM render_runs WHERE id=?`, runID).
-		Scan(&r.ID, &r.ProjectID, &r.Resolution, &r.Status, &finalized,
+		Scan(&r.ID, &r.ProjectID, &r.Resolution, &r.Platform, &r.SubtitleMode, &r.Status, &finalized,
 			&r.LastCompletedStage, &r.OutputURI, &r.Error, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RenderRunRecord{}, ErrRenderRunNotFound

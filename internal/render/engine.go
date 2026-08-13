@@ -17,12 +17,14 @@ import (
 
 // RunRequest starts or resumes a render.
 type RunRequest struct {
-	RunID      string
-	Project    model.Project
-	Resolution Resolution
-	Finalized  bool
-	IncludeBGM bool
-	ResumeFrom string
+	RunID        string
+	Project      model.Project
+	Resolution   Resolution
+	Finalized    bool
+	IncludeBGM   bool
+	ResumeFrom   string
+	Platform     string
+	SubtitleMode audio.SubtitleMode
 }
 
 // RunResult is the outcome of a pipeline execution.
@@ -100,6 +102,19 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		return RunResult{}, ErrNoStore
 	}
 	if err := req.Resolution.Validate(); err != nil {
+		return RunResult{}, err
+	}
+	if req.Platform == "" {
+		req.Platform = "youtube"
+	}
+	if req.SubtitleMode == "" {
+		if spec, ok := audio.SpecFor(req.Platform); ok {
+			req.SubtitleMode = spec.PreferredMode
+		} else {
+			req.SubtitleMode = audio.SubtitleSoft
+		}
+	}
+	if err := req.SubtitleMode.Validate(); err != nil {
 		return RunResult{}, err
 	}
 	if req.IncludeBGM && !req.Finalized {
@@ -215,6 +230,7 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err := e.ffmpeg.Mux(ctx, outPath, stageFiles, MuxPlan{
 		Width: width, Height: height, FPS: 30,
 		ClipDurations: durations, TransitionDuration: transition,
+		SubtitleMode: req.SubtitleMode,
 	}); err != nil {
 		run.Status = "failed"
 		run.Error = err.Error()
@@ -297,9 +313,11 @@ func (e *Engine) priorStageFiles(ctx context.Context, req RunRequest, stages []s
 					files = append(files, a.URI)
 				}
 			}
-		case StageAudio, StageSubtitles, StageLoudness:
+		case StageAudio, StageLoudness:
 			path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, stage+".wav")
 			files = append(files, path)
+		case StageSubtitles:
+			files = append(files, filepath.Join(e.outputDir, req.Project.ID, req.RunID, "subtitles.vtt"))
 		case StageBGMBeat:
 			path := filepath.Join(e.outputDir, req.Project.ID, req.RunID, "bgm_aligned.wav")
 			files = append(files, path)
@@ -373,7 +391,7 @@ func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.Ren
 	if req.RunID != "" {
 		existing, err := e.store.GetRenderRun(ctx, req.RunID)
 		if err == nil {
-			if existing.ProjectID != req.Project.ID || existing.Resolution != string(req.Resolution) || existing.Finalized != req.Finalized {
+			if existing.ProjectID != req.Project.ID || existing.Resolution != string(req.Resolution) || existing.Finalized != req.Finalized || existing.Platform != req.Platform || existing.SubtitleMode != string(req.SubtitleMode) {
 				return store.RenderRunRecord{}, fmt.Errorf("run id %s belongs to a different render request", req.RunID)
 			}
 			return existing, nil
@@ -384,7 +402,7 @@ func (e *Engine) loadOrCreateRun(ctx context.Context, req RunRequest) (store.Ren
 	}
 	run := store.RenderRunRecord{
 		ID: req.RunID, ProjectID: req.Project.ID,
-		Resolution: string(req.Resolution), Status: "pending",
+		Resolution: string(req.Resolution), Platform: req.Platform, SubtitleMode: string(req.SubtitleMode), Status: "pending",
 		Finalized: req.Finalized,
 	}
 	if err := e.store.CreateRenderRun(ctx, run); err != nil {
@@ -469,41 +487,70 @@ func (e *Engine) runAudioStage(ctx context.Context, req RunRequest, stage string
 	runDir := filepath.Join(e.outputDir, req.Project.ID, req.RunID)
 	path := filepath.Join(runDir, stage+".wav")
 	if e.audio == nil {
+		if stage == StageSubtitles {
+			path = filepath.Join(runDir, "subtitles.vtt")
+			if err := writeStubFile(path, "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nsubtitle"); err != nil {
+				return nil, err
+			}
+			return []string{path}, nil
+		}
 		if err := writeStubFile(path, stage); err != nil {
 			return nil, err
 		}
 		return []string{path}, nil
 	}
 
-	subdir := filepath.Join(req.Project.ID, req.RunID)
-	synth, err := e.audio.Synthesize(ctx, audio.SynthesizeRequest{
-		Project: req.Project, Platform: "youtube",
-		OutputSubdir: subdir,
-	})
+	mixPath := filepath.Join(runDir, "mix.wav")
+	subtitlePath := filepath.Join(runDir, "subs.vtt")
+	mixExists, err := regularFileExists(mixPath)
 	if err != nil {
 		return nil, err
+	}
+	subtitlesExist, err := regularFileExists(subtitlePath)
+	if err != nil {
+		return nil, err
+	}
+	if !mixExists || !subtitlesExist {
+		subdir := filepath.Join(req.Project.ID, req.RunID)
+		if _, err := e.audio.Synthesize(ctx, audio.SynthesizeRequest{
+			Project: req.Project, Platform: req.Platform, Mode: req.SubtitleMode,
+			OutputSubdir: subdir,
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	switch stage {
 	case StageAudio:
-		if err := copyFile(synth.AudioURI, path); err != nil {
+		if err := copyFile(mixPath, path); err != nil {
 			return nil, err
 		}
 	case StageSubtitles:
 		subOut := filepath.Join(runDir, "subtitles.vtt")
-		if synth.Mode == audio.SubtitleBurnIn {
-			subOut = filepath.Join(runDir, "subtitles.mp4")
-		}
-		if err := copyFile(synth.SubtitleURI, subOut); err != nil {
+		if err := copyFile(subtitlePath, subOut); err != nil {
 			return nil, err
 		}
 		path = subOut
 	case StageLoudness:
-		if err := copyFile(synth.AudioURI, path); err != nil {
+		if err := copyFile(mixPath, path); err != nil {
 			return nil, err
 		}
 	}
 	return []string{path}, nil
+}
+
+func regularFileExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("audio artifact %s is not a regular file", path)
+	}
+	return true, nil
 }
 
 func copyFile(src, dst string) error {

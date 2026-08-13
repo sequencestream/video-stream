@@ -2,6 +2,8 @@ package audio
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/sequencestream/video-stream/internal/model"
@@ -86,9 +88,34 @@ func TestEngineSynthesizeSoftAndBurnIn(t *testing.T) {
 		if res.AudioURI == "" || res.SubtitleURI == "" {
 			t.Fatalf("missing outputs: %+v", res)
 		}
+		body, readErr := os.ReadFile(res.SubtitleURI)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !strings.HasPrefix(string(body), "WEBVTT\n\n") || strings.Count(string(body), "WEBVTT") != 1 {
+			t.Fatalf("mode=%s produced invalid WebVTT: %q", mode, body)
+		}
 		if res.MeasuredLUFS < res.TargetLUFS-0.5 || res.MeasuredLUFS > res.TargetLUFS+0.5 {
 			t.Fatalf("lufs=%v target=%v", res.MeasuredLUFS, res.TargetLUFS)
 		}
+	}
+}
+
+func TestSegmentSubtitleUsesRuneBreaksAndChineseLineLimits(t *testing.T) {
+	seg := model.NewSeg("s1", "你好世界字幕", 2000)
+	seg.SubtitleBreaks = []int{2}
+	tokens := allocateTokens(seg.SegID, []string{"你好世界字幕"}, 2000)
+	lines := SegmentSubtitle(seg, tokens, PlatformSpec{MaxCharsPerLine: 2})
+	want := []string{"你好", "世界", "字幕"}
+	if strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("lines=%q want %q", lines, want)
+	}
+}
+
+func TestFormatWebVTTCueHasNoRepeatedHeader(t *testing.T) {
+	got := FormatWebVTT("seg-1", []string{"hello"}, 0, 1250)
+	if strings.Contains(got, "WEBVTT") || got != "seg-1\n00:00:00.000 --> 00:00:01.250\nhello\n" {
+		t.Fatalf("cue=%q", got)
 	}
 }
 

@@ -10,6 +10,8 @@ type RenderRunRecord struct {
 	ID                 string    `json:"id"`
 	ProjectID          string    `json:"project_id"`
 	Resolution         string    `json:"resolution"`
+	Platform           string    `json:"platform"`
+	SubtitleMode       string    `json:"subtitle_mode"`
 	Status             string    `json:"status"`
 	Finalized          bool      `json:"finalized"`
 	LastCompletedStage string    `json:"last_completed_stage,omitempty"`

@@ -74,6 +74,9 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 	if mode == "" {
 		mode = spec.PreferredMode
 	}
+	if err := mode.Validate(); err != nil {
+		return SynthesizeResult{}, err
+	}
 	outDir := filepath.Join(e.outputDir, req.Project.ID)
 	if req.OutputSubdir != "" {
 		outDir = filepath.Join(e.outputDir, req.OutputSubdir)
@@ -111,7 +114,7 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 	}
 
 	audioPath := filepath.Join(outDir, "mix.wav")
-	subPath := filepath.Join(outDir, subtitleFilename(mode))
+	subPath := filepath.Join(outDir, "subs.vtt")
 	if err := writeAudioMix(ctx, e.ffmpegBinary, audioPath, segments); err != nil {
 		return SynthesizeResult{}, err
 	}
@@ -147,17 +150,7 @@ func (e *Engine) Synthesize(ctx context.Context, req SynthesizeRequest) (Synthes
 	}, nil
 }
 
-func subtitleFilename(mode SubtitleMode) string {
-	if mode == SubtitleBurnIn {
-		return "subs-burned.mp4"
-	}
-	return "subs.vtt"
-}
-
 func buildSubtitleBody(project model.Project, segments []SegResult, spec PlatformSpec, mode SubtitleMode, totalMS int64) string {
-	if mode == SubtitleBurnIn {
-		return "BURNIN stub playable for " + project.ID
-	}
 	var b strings.Builder
 	b.WriteString("WEBVTT\n\n")
 	var offset int64
@@ -171,10 +164,13 @@ func buildSubtitleBody(project model.Project, segments []SegResult, spec Platfor
 		if i < len(segments) {
 			end = offset + segments[i].ActualMS
 		}
-		b.WriteString(FormatWebVTT(seg.SegID, lines, start, end))
-		b.WriteString("\n")
+		if cue := FormatWebVTT(seg.SegID, lines, start, end); cue != "" {
+			b.WriteString(cue)
+			b.WriteString("\n")
+		}
 		offset = end
 	}
+	_ = mode
 	_ = totalMS
 	return b.String()
 }
