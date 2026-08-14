@@ -46,4 +46,4 @@ GET  /v1/cost/capabilities
 
 ## 工程文件
 
-`project.cost_plan` 在 wizard 脚本步（step 4）写入，调用方从 `session.state.cost_plan` 读取。
+`project.cost_plan` 随工程一起持久化，调用方在渲染前通过 `/v1/cost/plan` 取得并读取它。

@@ -4,13 +4,11 @@
 
 ## P0：打通真实生产闭环
 
-### 1. 修复向导中的工程持久化
+### 1. ~~修复向导中的工程持久化~~（已作废）
 
-- [x] `completeScript` 在启用 CostWarden 时仍须调用 `SaveProject`。
-- [x] 增加 Step 1 → Step 7 的向导集成测试，确保脚本定稿后 Step 5 能读取工程。
-- [x] 覆盖失败步骤的 `resume`、服务重启后的会话恢复和重复提交幂等性。
-
-向导写操作通过持久化 operation journal 和 session version 防止重复计费、并发串步；服务重启将中断操作转为可显式续跑的失败状态。
+7 步向导连同 WebUI 一起删除了。它的会话、步骤号和 operation journal 都在解决人机交互的
+问题——点错、刷新、关掉浏览器；agent 重跑一条命令即可。工程持久化改由
+`POST /v1/projects`（`internal/intake`）承担。
 
 ### 2. 实现最小可用的真实渲染链路
 
@@ -57,17 +55,16 @@
 - [ ] 接入真实 embedding provider，替换结构卡片的伪 embedding。
 - [ ] 实现真实 prompt enrichment，同时确保 1080p 阶段复用 720p 的 prompt/seed/ref，不再次调用 LLM。
 
-### 6. 完善 7 步编排（CLI / API）
+### 6. 补齐各能力引擎的 CLI 入口
 
-- [x] 将 session id 写入 URL 或持久化存储，刷新后通过 GET 恢复。
-- [ ] 支持录入、编辑和选择真实对标账号，移除硬编码 `@peer1`。
-- [ ] 展示 radar 信号、结构卡片来源和选题依据。
-- [ ] 支持 Hook 选择与人工改写，并正确提交 `hook_edit`。
-- [ ] 增加 seg 级脚本编辑器，允许选择实际 seg 后触发增量重编译。
-- [ ] 展示 hybrid route、素材候选、许可证和成本降级决策。
-- [ ] 展示渲染 stage 进度、失败原因、续跑入口和缓存命中情况。
-- [ ] 内嵌播放 720p 预览，提供 1080p 下载和 YouTube 发布状态。
-- [ ] 增加明确的 loading、empty、degraded、failed 和 retry 状态。
+目前只有 radar / ideation / script / compliance / visual / hybrid / cost / youtube 的 HTTP 入口，
+CLI 只覆盖了 project → background → render 这条主链路。
+
+- [ ] `vs seg edit <project> <seg-id>` 改一句并触发增量重编译，输出失效数与缓存命中。
+- [ ] `vs radar` 录入对标账号、查看信号，移除硬编码 `@peer1`。
+- [ ] `vs render` 输出 stage 进度与失败 stage，`-resume-from` 直接续跑。
+- [ ] `vs publish` 走 YouTube 上传并回报状态。
+- [ ] 统一退出码：用法错误、服务不可达、任务失败三者可区分。
 
 ## P2：扩展输入与交付能力
 
@@ -116,7 +113,7 @@
 
 - [ ] 增加 `/v1/projects` 的创建、列表、读取、更新和归档接口。
 - [ ] 支持项目版本历史、派生 hash 校验和乐观并发控制。
-- [ ] 支持从已有项目重新进入向导或直接渲染。
+- [ ] 支持从已有项目派生新工程后直接渲染。
 
 ### 13. 数据库与 artifact 生命周期
 
@@ -143,11 +140,11 @@
 - 全局最佳发布时间预测和自适应热点阈值。
 - 自动放宽合规闸门或关闭 AI 生成标识。
 - 在真实编辑数据充足前配置化增量重编译边界或调整 40% 阈值。
-- 在基础向导可用前建设复杂的专业时间轴编辑器。
+- 任何图形界面，包括专业时间轴编辑器。
 
 ## 推荐里程碑
 
-1. **M0：流程可继续**——修复工程持久化，Step 1 → Step 7 集成测试通过。
+1. ~~**M0：流程可继续**~~——已由 `vs video` 这条端到端链路取代。
 2. **M1：真实可播放**——真实 TTS、本地素材和 FFmpeg 产出可播放 720p/1080p MP4。
 3. **M2：增量有效**——编辑一个 seg 时只重生成失效子树，并记录真实节省成本。
 4. **M3：内容可用**——接入真实脚本 Agent、素材 provider，补全 CLI 的分步操作。

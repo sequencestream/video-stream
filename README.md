@@ -75,7 +75,13 @@ invalidation_rate = Σ invalidated_segs / Σ total_segs    按 seg 加权，不�
 遇到就诚实地整片重来并记下是哪一条。
 
 阈值写死在看到任何数据之前：失效率 > **40%** 判 `scrap`，不足 **20** 次记录判
-`insufficient_data`（不默认成"可行"）。查看当前数字：
+`insufficient_data`（不默认成"可行"）。
+
+注意：**规划器目前没有调用方**——唯一触发它的是已删除的 7 步向导。渲染执行器仍然接受并
+校验计划，但在补上「改某个 seg 再重渲染」的 CLI 入口之前，下面这个报告只会一直是
+`insufficient_data`。
+
+查看当前数字：
 
 ```bash
 curl -s localhost:8080/v1/recompile/report | jq
@@ -233,13 +239,6 @@ mux 之后注入 `content_attribute` / `service_provider_code` / `content_id` �
 
 见 [`doc/arch/label.md`](doc/arch/label.md)。
 
-## 7 步端到端编排
-
-`internal/wizard` 把 radar → ideation → script → hybrid → render → label 串成一条带断点续跑的
-会话，通过 `/v1/wizard/sessions` 驱动。它原本是为界面的分步交互写的；界面去掉后仍然保留，
-因为「哪一步失败了、从哪一步续」这件事对调用方一样有用。操作说明见
-[`doc/wizard-guide.md`](doc/wizard-guide.md)。
-
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐）
@@ -383,9 +382,6 @@ vs credential status                           # 每个 provider 的密钥来自
 | GET | `/v1/hybrid/plans/{project_id}` | 读取已存的混合画面计划 |
 | POST | `/v1/render/run` | 启动/续跑渲染管线 |
 | GET | `/v1/render/runs/{id}` | 渲染 run 状态与 seg 产物追溯 |
-| POST | `/v1/wizard/sessions` | 创建向导会话（步骤 1） |
-| GET | `/v1/wizard/sessions/{id}` | 查询会话与任务状态 |
-| POST | `/v1/wizard/sessions/{id}/advance` | 完成当前步并前进 / 续跑 |
 | POST | `/v1/projects` | 导入标题 + 口播稿为已 seal 的工程（逐句测时长） |
 | GET | `/v1/projects` | 工程列表；`?limit=` 可限制条数 |
 | GET | `/v1/projects/{id}` | 读取单个工程 |
@@ -452,7 +448,6 @@ internal/hybrid       混合画面路线（AI / stock / Ken Burns / motion graph
 internal/render       FFmpeg 渲染管线（720p/1080p 共享 context）
 internal/label        mux 后合规标识注入与读回校验（不可关闭）
 internal/youtube      YouTube 上传适配（synthetic 恒 true）
-internal/wizard       7 步端到端编排（断点续跑）
 internal/intake       标题 + 口播稿 → 已 seal 的工程（预算逐句测量）
 internal/media        背景图裁到画幅并按 seg 归位
 internal/store       SQLite 持久化：任务、视频工程、渲染产物与重编译记录
@@ -471,6 +466,12 @@ sidecar/             Python sidecar
 
 **任何形式的图形界面**。产品表面就是 CLI；界面会变成第二套要跟着 API 一起演进的东西，而
 真正的调用方是 agent，它需要的是可解析的输出和退出码。
+
+**分步会话式编排**。原来的 7 步向导（`internal/wizard`）连同界面一起删掉了：它的会话、
+步骤号、operation journal 全都在解决「人点错了、刷新了、关掉浏览器了」这一类问题。agent
+不需要断点续跑一个会话，它重跑一条命令；而各能力引擎（radar / ideation / script /
+compliance / hybrid / render / cost / youtube）各自的 HTTP 入口都还在，要串什么顺序由调用方
+自己决定。
 
 密钥方面明确不做：云端密钥托管、团队共享凭据、MVP 阶段的浏览器 cookie 抓取。
 
