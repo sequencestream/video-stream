@@ -2,11 +2,10 @@ package main
 
 // vs credential manages provider API keys.
 //
-// Unlike every other vs subcommand, this one talks to the local credential
-// store directly instead of going through the main service over HTTP. Two
-// reasons: a secret should not travel over a socket only to be stored on the
-// same machine, and the OS keychain that holds it belongs to the logged-in
-// user rather than to the daemon's process.
+// It is the one command that touches something other than media files: the
+// local credential store. Keys stay in the OS keychain or an encrypted vault
+// belonging to the logged-in user, never in the config file, and never as a
+// command-line argument where the process list would expose them.
 
 import (
 	"context"
@@ -27,73 +26,65 @@ import (
 // and CI.
 const vaultPassphraseEnv = "VS_VAULT_PASSPHRASE"
 
-func cmdCredential(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		credentialUsage()
-		return errors.New("usage: vs credential <set|status|rm> [provider]")
-	}
-
-	switch args[0] {
-	case "set":
-		return credentialSet(ctx, args[1:])
-	case "status", "list", "ls":
-		return credentialStatus(ctx, args[1:])
-	case "rm", "remove", "delete":
-		return credentialRemove(ctx, args[1:])
-	case "help", "--help", "-h":
-		credentialUsage()
-		return nil
-	default:
-		credentialUsage()
-		return fmt.Errorf("unknown credential subcommand %q", args[0])
-	}
-}
-
-func credentialUsage() {
-	// io.WriteString rather than fmt.Fprint: the examples below contain a %s
-	// that belongs to printf(1), not to Go.
-	io.WriteString(os.Stderr, `vs credential - manage provider API keys in the local credential store
-
-Usage:
-  vs credential set <provider>     read a key from stdin and store it
-  vs credential status [provider]  show which backend holds a key
-  vs credential rm <provider>      remove a key from every backend that has it
+func credentialCommand() *Command {
+	return &Command{
+		Name:    "credential",
+		Aliases: []string{"cred"},
+		Group:   groupSetup,
+		Summary: "Store API keys for the commands that call a hosted model",
+		Args:    "<set|status|rm> [provider]",
+		NoInput: true,
+		Long: `Reads and writes the local credential store: the OS keychain where one is
+available, an encrypted vault otherwise, with environment variables taking
+precedence over both.
 
 The key is never taken as an argument, so it cannot end up in the process list
-or the shell history. Type it at the prompt, or pipe it in:
+or in shell history. Type it at the prompt, or pipe it in.
 
-  vs credential set openai
-  printf %s "$OPENAI_API_KEY" | vs credential set openai
-
-Flags:
-  -config string   path to the YAML config file (env VS_CONFIG)
-
-Environment:
-  VS_VAULT_PASSPHRASE   unlocks the encrypted vault without prompting
-`)
+Nothing in the editing commands needs a key — speech recognition and every
+ffmpeg operation run locally. This exists for the providers configured in the
+config file.`,
+		Examples: []Example{
+			{Command: "vs credential set openai", Note: "prompt for the key, store it in the keychain"},
+			{Command: `printf %s "$OPENAI_API_KEY" | vs credential set openai`, Note: "pipe it in from a script"},
+			{Command: "vs credential status", Note: "show which backend holds each provider's key"},
+			{Command: "vs credential rm openai"},
+		},
+		Setup: func(fs *flag.FlagSet) {},
+		Run:   runCredential,
+	}
 }
 
-func credentialSet(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("credential set", flag.ContinueOnError)
-	configPath := fs.String("config", defaultConfigPath(), "path to the YAML config file")
-	if err := fs.Parse(args); err != nil {
-		return err
+func runCredential(ctx context.Context, env *Env, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: vs credential <set|status|rm> [provider]\nRun `vs credential --help` for details.")
 	}
+	switch args[0] {
+	case "set":
+		return credentialSet(ctx, env, args[1:])
+	case "status", "list", "ls":
+		return credentialStatus(ctx, env, args[1:])
+	case "rm", "remove", "delete":
+		return credentialRemove(ctx, env, args[1:])
+	default:
+		return fmt.Errorf("unknown credential subcommand %q: want set, status or rm", args[0])
+	}
+}
 
-	provider := strings.TrimSpace(fs.Arg(0))
+func credentialSet(ctx context.Context, env *Env, args []string) error {
+	provider := ""
+	if len(args) > 0 {
+		provider = strings.TrimSpace(args[0])
+	}
 	if provider == "" {
 		return errors.New("usage: vs credential set <provider>")
 	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return err
-	}
+	cfg := env.Config
 	if _, ok := cfg.Provider(provider); !ok {
-		// Not fatal, because setting the key before editing config.yaml is a
+		// Not fatal, because setting the key before editing the config is a
 		// reasonable order to work in. But silently succeeding on a typo would
 		// leave the user staring at a provider that still reports no key.
-		fmt.Fprintf(os.Stderr, "vs: warning: no provider named %q is configured; the key is stored but nothing reads it yet\n", provider)
+		fmt.Fprintf(env.Stderr, "vs: warning: no provider named %q is configured; the key is stored but nothing reads it yet\n", provider)
 	}
 
 	secret, err := readSecret(fmt.Sprintf("API key for %s: ", provider))
@@ -127,23 +118,18 @@ func credentialSet(ctx context.Context, args []string) error {
 	return nil
 }
 
-func credentialStatus(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("credential status", flag.ContinueOnError)
-	configPath := fs.String("config", defaultConfigPath(), "path to the YAML config file")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return err
-	}
+func credentialStatus(ctx context.Context, env *Env, args []string) error {
+	cfg := env.Config
 	chain, err := openChain(cfg, os.Getenv(vaultPassphraseEnv))
 	if err != nil {
 		return err
 	}
 
-	names := providerNames(cfg, fs.Arg(0))
+	requested := ""
+	if len(args) > 0 {
+		requested = args[0]
+	}
+	names := providerNames(cfg, requested)
 	if len(names) == 0 {
 		fmt.Println("no providers are configured")
 		return nil
@@ -172,26 +158,19 @@ func credentialStatus(ctx context.Context, args []string) error {
 	return nil
 }
 
-func credentialRemove(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("credential rm", flag.ContinueOnError)
-	configPath := fs.String("config", defaultConfigPath(), "path to the YAML config file")
-	if err := fs.Parse(args); err != nil {
-		return err
+func credentialRemove(ctx context.Context, env *Env, args []string) error {
+	provider := ""
+	if len(args) > 0 {
+		provider = strings.TrimSpace(args[0])
 	}
-
-	provider := strings.TrimSpace(fs.Arg(0))
 	if provider == "" {
 		return errors.New("usage: vs credential rm <provider>")
 	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return err
-	}
+	cfg := env.Config
 
 	key := credential.ProviderKey(provider)
 	var chain *credential.Chain
-	err = withCredentials(cfg, func(c *credential.Chain) error {
+	err := withCredentials(cfg, func(c *credential.Chain) error {
 		chain = c
 		return c.Delete(ctx, key)
 	})
@@ -296,11 +275,4 @@ func readSecret(prompt string) (string, error) {
 		return "", fmt.Errorf("read secret from stdin: %w", err)
 	}
 	return strings.TrimRight(string(raw), "\r\n"), nil
-}
-
-func defaultConfigPath() string {
-	if v := os.Getenv("VS_CONFIG"); v != "" {
-		return v
-	}
-	return "config.yaml"
 }

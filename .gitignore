@@ -1,23 +1,22 @@
 # Build output
 /bin/
 /dist/
+/vs
 *.exe
-
-# Local runtime data
-/data/
-/output/
-*.db
-*.db-shm
-*.db-wal
 
 # Config with secrets
 config.local.yaml
 .env
 .env.local
 
-out/
-next-env.d.ts
-*.tsbuildinfo
+# Media produced while trying things out
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.srt
+*.vtt
 
 # Python
 __pycache__/

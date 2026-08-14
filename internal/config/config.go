@@ -1,13 +1,13 @@
-// Package config loads the unified configuration shared by the daemon and CLI.
+// Package config loads vs's optional configuration.
 //
 // Precedence is: built-in defaults < YAML file < VS_-prefixed environment
-// variables.
+// variables < command flags. Every field has a working default, and a missing
+// config file is not an error: a fresh checkout must be able to run
+// `vs subtitle clip.mp4` without anyone writing YAML first. The file exists to
+// stop you retyping the same eight flags, not to gate the tool.
 //
-// Nothing in this package holds a secret. Provider entries carry only metadata,
-// and the key itself is fetched from internal/credential at the moment of use.
-// That is deliberate: a Config is passed around widely and serialised by the
-// meta endpoint, so a plaintext field here would be one careless log line away
-// from leaking. See doc/arch/credentials.md.
+// Nothing here holds a secret. Provider entries carry only metadata, and the
+// key itself is fetched from internal/credential at the moment of use.
 package config
 
 import (
@@ -18,126 +18,119 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sequencestream/video-stream/internal/compliance"
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the full runtime configuration.
 type Config struct {
-	Server        Server        `yaml:"server"`
-	Sidecar       Sidecar       `yaml:"sidecar"`
-	Storage       Storage       `yaml:"storage"`
-	Audio         Audio         `yaml:"audio"`
-	Budget        Budget        `yaml:"budget"`
-	Logging       Logging       `yaml:"logging"`
-	Telemetry     Telemetry     `yaml:"telemetry"`
-	Queue         Queue         `yaml:"queue"`
-	Credentials   Credentials   `yaml:"credentials"`
-	Providers     []Provider    `yaml:"providers"`
-	Radar         Radar         `yaml:"radar"`
-	ScriptAgents  ScriptAgents  `yaml:"script_agents"`
-	Compliance    Compliance    `yaml:"compliance"`
-	Notifications Notifications `yaml:"notifications"`
+	Tools       Tools       `yaml:"tools"`
+	ASR         ASR         `yaml:"asr"`
+	Subtitle    Subtitle    `yaml:"subtitle"`
+	Filler      Filler      `yaml:"filler"`
+	Encode      Encode      `yaml:"encode"`
+	Logging     Logging     `yaml:"logging"`
+	Credentials Credentials `yaml:"credentials"`
+	Providers   []Provider  `yaml:"providers"`
 }
 
-// Audio selects the text-to-speech implementation used by the daemon.
-type Audio struct {
-	Provider     string `yaml:"provider"`
-	DefaultVoice string `yaml:"default_voice"`
-	PythonBinary string `yaml:"python_binary"`
-	FFmpegBinary string `yaml:"ffmpeg_binary"`
+// Tools locates the external binaries vs shells out to. Bare names are resolved
+// through PATH; absolute paths let a user pin a specific build.
+type Tools struct {
+	FFmpeg  string `yaml:"ffmpeg"`
+	FFprobe string `yaml:"ffprobe"`
+	Python  string `yaml:"python"`
 }
 
-// Radar controls the competitor radar polling schedule and rate limits.
-type Radar struct {
-	// Interval is how often the daemon polls watched accounts. Zero disables
-	// background polling; readings can still be ingested over HTTP.
-	Interval time.Duration `yaml:"interval"`
-	// PerMinute caps outbound requests to each platform. Zero means unlimited,
-	// which is appropriate for tests and local fixtures only.
-	PerMinute float64 `yaml:"per_minute"`
-	// Burst is how many requests may be sent back-to-back after an idle period.
-	Burst int `yaml:"burst"`
+// ASR configures speech recognition.
+type ASR struct {
+	// Backend selects the recognizer. Only faster-whisper is implemented.
+	Backend string `yaml:"backend"`
+	// Model is a faster-whisper model name (tiny/base/small/medium/large-v3) or
+	// a path to a converted CTranslate2 model directory.
+	Model string `yaml:"model"`
+	// Language is a two-letter code. Empty means autodetect, which costs one
+	// extra pass over the first 30 seconds.
+	Language string `yaml:"language"`
+	// Device is auto, cpu or cuda.
+	Device string `yaml:"device"`
+	// ComputeType is auto, int8, int8_float16, float16 or float32.
+	ComputeType string `yaml:"compute_type"`
+	// ModelDir overrides where downloaded models are cached.
+	ModelDir string `yaml:"model_dir"`
+	// Threads caps CPU threads. Zero lets the backend decide.
+	Threads int `yaml:"threads"`
+	// VAD drops silence before recognition. It is on by default because
+	// whisper hallucinates text into long silences.
+	VAD bool `yaml:"vad"`
 }
 
-// ScriptAgents controls the multi-agent script polish loop termination thresholds.
-type ScriptAgents struct {
-	MaxRounds             int     `yaml:"max_rounds"`
-	MetricImprovementMin  float64 `yaml:"metric_improvement_min"`
-	MaxNewIssues          int     `yaml:"max_new_issues"`
-	StagnantRounds        int     `yaml:"stagnant_rounds"`
-	CostPer1KTokensMicros int64   `yaml:"cost_per_1k_tokens_micros"`
+// Subtitle holds the default look of rendered subtitles. Colors are ASS
+// &HBBGGRR (blue-green-red), which is the order libass reads, not RGB.
+type Subtitle struct {
+	Font         string  `yaml:"font"`
+	FontSize     int     `yaml:"font_size"`
+	PrimaryColor string  `yaml:"primary_color"`
+	OutlineColor string  `yaml:"outline_color"`
+	Outline      float64 `yaml:"outline"`
+	Shadow       float64 `yaml:"shadow"`
+	// MarginV is the distance from the frame edge in pixels.
+	MarginV int `yaml:"margin_v"`
+	// Position is bottom, center or top.
+	Position string `yaml:"position"`
+	// MaxChars is the soft line-length cap used when splitting cues.
+	MaxChars int `yaml:"max_chars"`
+	// MaxLines caps how many lines one cue may occupy.
+	MaxLines int `yaml:"max_lines"`
 }
 
-// Notifications configures completion webhook and email channels.
-type Notifications struct {
-	WebhookURL string `yaml:"webhook_url" json:"webhook_url"`
-	EmailTo    string `yaml:"email_to" json:"email_to"`
-	SMTPHost   string `yaml:"smtp_host" json:"smtp_host"`
-	SMTPPort   int    `yaml:"smtp_port" json:"smtp_port"`
-	SMTPFrom   string `yaml:"smtp_from" json:"smtp_from"`
-	SMTPUser   string `yaml:"smtp_user" json:"smtp_user"`
+// Filler configures what counts as a disfluency worth cutting.
+type Filler struct {
+	// ExtraWords are added to the built-in disfluency list.
+	ExtraWords []string `yaml:"extra_words"`
+	// KeepWords are removed from the built-in list, for speakers whose "嗯"
+	// carries meaning.
+	KeepWords []string `yaml:"keep_words"`
+	// MaxPause is the longest silence kept intact. Longer gaps are trimmed
+	// down to it rather than removed outright, because a cut to zero makes
+	// speech sound spliced.
+	MaxPause time.Duration `yaml:"max_pause"`
+	// PadHead and PadTail widen every kept range so a cut never clips the
+	// attack of the following word or the release of the previous one.
+	PadHead time.Duration `yaml:"pad_head"`
+	PadTail time.Duration `yaml:"pad_tail"`
+	// MinKeep drops surviving fragments shorter than this: a 40 ms island of
+	// speech between two cuts reads as a glitch, not as a word.
+	MinKeep time.Duration `yaml:"min_keep"`
 }
 
-// Compliance controls inauthentic-differentiation gate thresholds.
-type Compliance struct {
-	RejectSimilarity float64 `yaml:"reject_similarity"`
-	PassSimilarity   float64 `yaml:"pass_similarity"`
-	ReuseWindowDays  int     `yaml:"reuse_window_days"`
-	MaxReuses        int     `yaml:"max_reuses"`
+// Encode holds the default output encoding. These apply whenever a command has
+// to re-encode; commands that can pass the stream through untouched do so.
+type Encode struct {
+	VideoCodec string `yaml:"video_codec"`
+	AudioCodec string `yaml:"audio_codec"`
+	// CRF is the x264/x265 quality factor: lower is better, 18 is visually
+	// lossless, 23 is the ffmpeg default.
+	CRF int `yaml:"crf"`
+	// Preset trades encode speed for file size.
+	Preset string `yaml:"preset"`
+	// AudioBitrate is an ffmpeg bitrate string such as 192k.
+	AudioBitrate string `yaml:"audio_bitrate"`
 }
 
-// Server holds the HTTP listener settings of the main service.
-type Server struct {
-	Addr string `yaml:"addr"`
-}
-
-// Sidecar holds the connection settings for the Python sidecar process.
-type Sidecar struct {
-	BaseURL string        `yaml:"base_url"`
-	Timeout time.Duration `yaml:"timeout"`
-}
-
-// Storage holds on-disk locations owned by the main service.
-type Storage struct {
-	// DataDir holds internal state such as the task database.
-	DataDir string `yaml:"data_dir"`
-	// OutputDir holds rendered artifacts handed back to the user.
-	OutputDir string `yaml:"output_dir"`
-	// MediaDir holds optional local source images/videos arranged as
-	// <project_id>/<seg_id>.<extension>.
-	MediaDir string `yaml:"media_dir"`
-}
-
-// Budget caps spend so a runaway pipeline cannot bill indefinitely. It is
-// serialised to JSON by the meta endpoint, hence the json tags.
-type Budget struct {
-	// MaxCostPerVideoUSD is the ceiling for a single video job.
-	MaxCostPerVideoUSD float64 `yaml:"max_cost_per_video_usd" json:"max_cost_per_video_usd"`
-	// DailyCapUSD is the ceiling across all jobs in a rolling day.
-	DailyCapUSD float64 `yaml:"daily_cap_usd" json:"daily_cap_usd"`
-}
-
-// Logging controls the structured logger.
+// Logging controls diagnostic output. Normal command output does not go
+// through the logger.
 type Logging struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
 }
 
-// Telemetry controls the event reporting sink.
-type Telemetry struct {
-	// Enabled turns the log reporter on; when false a no-op reporter is used.
-	Enabled bool `yaml:"enabled"`
-	// Endpoint is reserved for a future remote sink. Unused in the MVP.
-	Endpoint string `yaml:"endpoint"`
-}
-
-// Queue controls the in-process task queue.
-type Queue struct {
-	// Workers is the number of concurrent task workers.
-	Workers int `yaml:"workers"`
-	// Buffer is the dispatch channel depth.
-	Buffer int `yaml:"buffer"`
+// Credentials selects where secrets are stored. It holds no secret itself.
+type Credentials struct {
+	// Backend is auto, keychain, vault or env. See internal/credential.
+	Backend string `yaml:"backend"`
+	// VaultPath overrides the encrypted vault location. Empty means a file
+	// named credentials.vault inside the user config directory.
+	VaultPath string `yaml:"vault_path"`
 }
 
 // Protocol identifiers for Provider.Protocol.
@@ -147,24 +140,15 @@ const (
 	ProtocolOpenAI = "openai"
 )
 
-// Credentials selects where secrets are stored. It holds no secret itself.
-type Credentials struct {
-	// Backend is auto, keychain, vault or env. See internal/credential.
-	Backend string `yaml:"backend"`
-	// VaultPath overrides the encrypted vault location. Empty means a file
-	// named credentials.vault inside Storage.DataDir.
-	VaultPath string `yaml:"vault_path"`
-}
-
-// Provider describes one model provider.
+// Provider describes one model provider, for the commands that call a hosted
+// model rather than a local binary.
 //
 // It carries no API key, by design. The key is read from the credential store
 // under credential.ProviderKey(Name) at the moment a request is built.
 type Provider struct {
-	Name    string `yaml:"name"`
-	BaseURL string `yaml:"base_url"`
-	Model   string `yaml:"model"`
-	// Protocol is the wire format to speak. Empty means ProtocolOpenAI.
+	Name     string `yaml:"name"`
+	BaseURL  string `yaml:"base_url"`
+	Model    string `yaml:"model"`
 	Protocol string `yaml:"protocol"`
 }
 
@@ -189,56 +173,67 @@ func (c Config) Provider(name string) (Provider, bool) {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Server:  Server{Addr: ":8080"},
-		Sidecar: Sidecar{BaseURL: "http://127.0.0.1:8090", Timeout: 5 * time.Second},
-		Storage: Storage{DataDir: "./data", OutputDir: "./output", MediaDir: "./media"},
-		Audio: Audio{
-			Provider: "edge", DefaultVoice: "zh-CN-XiaoxiaoNeural",
-			PythonBinary: "python3", FFmpegBinary: "ffmpeg",
+		Tools: Tools{FFmpeg: "ffmpeg", FFprobe: "ffprobe", Python: "python3"},
+		ASR: ASR{
+			Backend: "faster-whisper", Model: "small", Device: "auto",
+			ComputeType: "auto", VAD: true,
 		},
-		Budget:      Budget{MaxCostPerVideoUSD: 2.0, DailyCapUSD: 20.0},
-		Logging:     Logging{Level: "info", Format: "json"},
-		Queue:       Queue{Workers: 2, Buffer: 64},
+		Subtitle: Subtitle{
+			Font: "", FontSize: 42,
+			PrimaryColor: "&H00FFFFFF", OutlineColor: "&H00000000",
+			Outline: 2, Shadow: 0, MarginV: 60,
+			Position: "bottom", MaxChars: 20, MaxLines: 2,
+		},
+		Filler: Filler{
+			MaxPause: 700 * time.Millisecond,
+			PadHead:  60 * time.Millisecond,
+			PadTail:  80 * time.Millisecond,
+			MinKeep:  200 * time.Millisecond,
+		},
+		Encode: Encode{
+			VideoCodec: "libx264", AudioCodec: "aac",
+			CRF: 20, Preset: "medium", AudioBitrate: "192k",
+		},
+		Logging:     Logging{Level: "warn", Format: "text"},
 		Credentials: Credentials{Backend: "auto"},
-		Radar: Radar{
-			Interval:  6 * time.Hour,
-			PerMinute: 6,
-			Burst:     1,
-		},
-		ScriptAgents: ScriptAgents{
-			MaxRounds:             3,
-			MetricImprovementMin:  0.03,
-			MaxNewIssues:          1,
-			StagnantRounds:        2,
-			CostPer1KTokensMicros: 500,
-		},
-		Compliance: Compliance{
-			RejectSimilarity: 0.85,
-			PassSimilarity:   0.70,
-			ReuseWindowDays:  30,
-			MaxReuses:        3,
-		},
 	}
 }
 
+// Dir is the per-user configuration directory, honoring XDG_CONFIG_HOME.
+func Dir() string {
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "vs")
+	}
+	return ".vs"
+}
+
+// DefaultPath is where Load looks when given no explicit path.
+func DefaultPath() string {
+	if v := strings.TrimSpace(os.Getenv("VS_CONFIG")); v != "" {
+		return v
+	}
+	return filepath.Join(Dir(), "config.yaml")
+}
+
 // Load builds the configuration from defaults, an optional YAML file and the
-// environment. A missing file at path is not an error, which keeps the
-// zero-configuration path working.
+// environment. A missing file is not an error: that is the zero-configuration
+// path, and it is the one most invocations take.
 func Load(path string) (Config, error) {
 	cfg := Default()
 
-	if path != "" {
-		data, err := os.ReadFile(path)
-		switch {
-		case err == nil:
-			if err := yaml.Unmarshal(data, &cfg); err != nil {
-				return Config{}, fmt.Errorf("parse config %s: %w", path, err)
-			}
-		case os.IsNotExist(err):
-			// Defaults plus environment are a valid configuration.
-		default:
-			return Config{}, fmt.Errorf("read config %s: %w", path, err)
+	if strings.TrimSpace(path) == "" {
+		path = DefaultPath()
+	}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return Config{}, fmt.Errorf("parse config %s: %w", path, err)
 		}
+	case os.IsNotExist(err):
+		// Defaults plus environment are a valid configuration.
+	default:
+		return Config{}, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	applyEnv(&cfg)
@@ -250,107 +245,75 @@ func Load(path string) (Config, error) {
 }
 
 func applyEnv(cfg *Config) {
-	setString(&cfg.Server.Addr, "VS_SERVER_ADDR")
-	setString(&cfg.Sidecar.BaseURL, "VS_SIDECAR_BASE_URL")
-	setDuration(&cfg.Sidecar.Timeout, "VS_SIDECAR_TIMEOUT")
-	setString(&cfg.Storage.DataDir, "VS_DATA_DIR")
-	setString(&cfg.Storage.OutputDir, "VS_OUTPUT_DIR")
-	setString(&cfg.Storage.MediaDir, "VS_MEDIA_DIR")
-	setString(&cfg.Audio.Provider, "VS_TTS_PROVIDER")
-	setString(&cfg.Audio.DefaultVoice, "VS_TTS_VOICE")
-	setString(&cfg.Audio.PythonBinary, "VS_TTS_PYTHON_BINARY")
-	setString(&cfg.Audio.FFmpegBinary, "VS_TTS_FFMPEG_BINARY")
-	setFloat(&cfg.Budget.MaxCostPerVideoUSD, "VS_MAX_COST_PER_VIDEO_USD")
-	setFloat(&cfg.Budget.DailyCapUSD, "VS_DAILY_CAP_USD")
+	setString(&cfg.Tools.FFmpeg, "VS_FFMPEG")
+	setString(&cfg.Tools.FFprobe, "VS_FFPROBE")
+	setString(&cfg.Tools.Python, "VS_PYTHON")
+	setString(&cfg.ASR.Backend, "VS_ASR_BACKEND")
+	setString(&cfg.ASR.Model, "VS_ASR_MODEL")
+	setString(&cfg.ASR.Language, "VS_ASR_LANGUAGE")
+	setString(&cfg.ASR.Device, "VS_ASR_DEVICE")
+	setString(&cfg.ASR.ComputeType, "VS_ASR_COMPUTE_TYPE")
+	setString(&cfg.ASR.ModelDir, "VS_ASR_MODEL_DIR")
+	setInt(&cfg.ASR.Threads, "VS_ASR_THREADS")
+	setBool(&cfg.ASR.VAD, "VS_ASR_VAD")
+	setString(&cfg.Subtitle.Font, "VS_SUBTITLE_FONT")
+	setInt(&cfg.Subtitle.FontSize, "VS_SUBTITLE_FONT_SIZE")
+	setInt(&cfg.Subtitle.MaxChars, "VS_SUBTITLE_MAX_CHARS")
+	setString(&cfg.Encode.VideoCodec, "VS_VIDEO_CODEC")
+	setString(&cfg.Encode.AudioCodec, "VS_AUDIO_CODEC")
+	setInt(&cfg.Encode.CRF, "VS_CRF")
+	setString(&cfg.Encode.Preset, "VS_PRESET")
 	setString(&cfg.Logging.Level, "VS_LOG_LEVEL")
 	setString(&cfg.Logging.Format, "VS_LOG_FORMAT")
-	setBool(&cfg.Telemetry.Enabled, "VS_TELEMETRY_ENABLED")
-	setString(&cfg.Telemetry.Endpoint, "VS_TELEMETRY_ENDPOINT")
-	setInt(&cfg.Queue.Workers, "VS_QUEUE_WORKERS")
-	setInt(&cfg.Queue.Buffer, "VS_QUEUE_BUFFER")
 	setString(&cfg.Credentials.Backend, "VS_CREDENTIALS_BACKEND")
 	setString(&cfg.Credentials.VaultPath, "VS_CREDENTIALS_VAULT_PATH")
-	setDuration(&cfg.Radar.Interval, "VS_RADAR_INTERVAL")
-	setFloat(&cfg.Radar.PerMinute, "VS_RADAR_PER_MINUTE")
-	setInt(&cfg.Radar.Burst, "VS_RADAR_BURST")
-	setInt(&cfg.ScriptAgents.MaxRounds, "VS_SCRIPT_MAX_ROUNDS")
-	setFloat(&cfg.ScriptAgents.MetricImprovementMin, "VS_SCRIPT_METRIC_IMPROVEMENT_MIN")
-	setInt(&cfg.ScriptAgents.MaxNewIssues, "VS_SCRIPT_MAX_NEW_ISSUES")
-	setInt(&cfg.ScriptAgents.StagnantRounds, "VS_SCRIPT_STAGNANT_ROUNDS")
-	setInt64(&cfg.ScriptAgents.CostPer1KTokensMicros, "VS_SCRIPT_COST_PER_1K_TOKENS_MICROS")
-	setFloat(&cfg.Compliance.RejectSimilarity, "VS_COMPLIANCE_REJECT_SIMILARITY")
-	setFloat(&cfg.Compliance.PassSimilarity, "VS_COMPLIANCE_PASS_SIMILARITY")
-	setInt(&cfg.Compliance.ReuseWindowDays, "VS_COMPLIANCE_REUSE_WINDOW_DAYS")
-	setInt(&cfg.Compliance.MaxReuses, "VS_COMPLIANCE_MAX_REUSES")
-	setString(&cfg.Notifications.WebhookURL, "VS_NOTIFY_WEBHOOK_URL")
-	setString(&cfg.Notifications.EmailTo, "VS_NOTIFY_EMAIL_TO")
-	setString(&cfg.Notifications.SMTPHost, "VS_SMTP_HOST")
-	setInt(&cfg.Notifications.SMTPPort, "VS_SMTP_PORT")
-	setString(&cfg.Notifications.SMTPFrom, "VS_SMTP_FROM")
-	setString(&cfg.Notifications.SMTPUser, "VS_SMTP_USER")
+	setDuration(&cfg.Filler.MaxPause, "VS_FILLER_MAX_PAUSE")
+	setDuration(&cfg.Filler.MinKeep, "VS_FILLER_MIN_KEEP")
 }
 
 // Validate rejects configurations that would fail later in confusing ways.
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.Server.Addr) == "" {
-		return fmt.Errorf("server.addr must not be empty")
+	if strings.TrimSpace(c.Tools.FFmpeg) == "" {
+		return fmt.Errorf("tools.ffmpeg must not be empty")
 	}
-	if strings.TrimSpace(c.Sidecar.BaseURL) == "" {
-		return fmt.Errorf("sidecar.base_url must not be empty")
+	if strings.TrimSpace(c.Tools.FFprobe) == "" {
+		return fmt.Errorf("tools.ffprobe must not be empty")
 	}
-	if c.Sidecar.Timeout <= 0 {
-		return fmt.Errorf("sidecar.timeout must be positive, got %s", c.Sidecar.Timeout)
+	if c.ASR.Backend != "faster-whisper" {
+		return fmt.Errorf("asr.backend must be faster-whisper, got %q", c.ASR.Backend)
 	}
-	if c.Queue.Workers < 1 {
-		return fmt.Errorf("queue.workers must be at least 1, got %d", c.Queue.Workers)
+	if strings.TrimSpace(c.ASR.Model) == "" {
+		return fmt.Errorf("asr.model must not be empty")
 	}
-	if c.Queue.Buffer < 1 {
-		return fmt.Errorf("queue.buffer must be at least 1, got %d", c.Queue.Buffer)
-	}
-	if c.Budget.MaxCostPerVideoUSD < 0 || c.Budget.DailyCapUSD < 0 {
-		return fmt.Errorf("budget caps must not be negative")
-	}
-	switch c.Audio.Provider {
-	case "edge":
-		if strings.TrimSpace(c.Audio.DefaultVoice) == "" {
-			return fmt.Errorf("audio.default_voice must not be empty for edge TTS")
-		}
-		if strings.TrimSpace(c.Audio.PythonBinary) == "" {
-			return fmt.Errorf("audio.python_binary must not be empty for edge TTS")
-		}
-		if strings.TrimSpace(c.Audio.FFmpegBinary) == "" {
-			return fmt.Errorf("audio.ffmpeg_binary must not be empty for edge TTS")
-		}
-	case "stub":
+	switch strings.ToLower(strings.TrimSpace(c.ASR.Device)) {
+	case "auto", "cpu", "cuda":
 	default:
-		return fmt.Errorf("audio.provider must be edge or stub, got %q", c.Audio.Provider)
+		return fmt.Errorf("asr.device must be auto, cpu or cuda, got %q", c.ASR.Device)
 	}
-	if c.Radar.Interval < 0 {
-		return fmt.Errorf("radar.interval must not be negative, got %s", c.Radar.Interval)
+	if c.ASR.Threads < 0 {
+		return fmt.Errorf("asr.threads must not be negative, got %d", c.ASR.Threads)
 	}
-	if c.Radar.PerMinute < 0 {
-		return fmt.Errorf("radar.per_minute must not be negative, got %g", c.Radar.PerMinute)
+	if c.Subtitle.FontSize <= 0 {
+		return fmt.Errorf("subtitle.font_size must be positive, got %d", c.Subtitle.FontSize)
 	}
-	if c.Radar.Burst < 0 {
-		return fmt.Errorf("radar.burst must not be negative, got %d", c.Radar.Burst)
+	if c.Subtitle.MaxChars <= 0 {
+		return fmt.Errorf("subtitle.max_chars must be positive, got %d", c.Subtitle.MaxChars)
 	}
-	if c.ScriptAgents.MaxRounds < 1 {
-		return fmt.Errorf("script_agents.max_rounds must be at least 1, got %d", c.ScriptAgents.MaxRounds)
+	if c.Subtitle.MaxLines <= 0 {
+		return fmt.Errorf("subtitle.max_lines must be positive, got %d", c.Subtitle.MaxLines)
 	}
-	if c.ScriptAgents.MetricImprovementMin < 0 {
-		return fmt.Errorf("script_agents.metric_improvement_min must not be negative")
+	switch strings.ToLower(strings.TrimSpace(c.Subtitle.Position)) {
+	case "bottom", "center", "top":
+	default:
+		return fmt.Errorf("subtitle.position must be bottom, center or top, got %q", c.Subtitle.Position)
 	}
-	if c.ScriptAgents.StagnantRounds < 1 {
-		return fmt.Errorf("script_agents.stagnant_rounds must be at least 1")
+	if c.Encode.CRF < 0 || c.Encode.CRF > 51 {
+		return fmt.Errorf("encode.crf must be within 0..51, got %d", c.Encode.CRF)
 	}
-	if err := (compliance.Config{
-		RejectSimilarity: c.Compliance.RejectSimilarity,
-		PassSimilarity:   c.Compliance.PassSimilarity,
-		ReuseWindowDays:  c.Compliance.ReuseWindowDays,
-		MaxReuses:        c.Compliance.MaxReuses,
-	}).Effective().Validate(); err != nil {
-		return fmt.Errorf("compliance: %w", err)
+	if c.Filler.MaxPause < 0 || c.Filler.PadHead < 0 || c.Filler.PadTail < 0 || c.Filler.MinKeep < 0 {
+		return fmt.Errorf("filler durations must not be negative")
 	}
+
 	seen := make(map[string]bool, len(c.Providers))
 	for _, p := range c.Providers {
 		if strings.TrimSpace(p.Name) == "" {
@@ -369,19 +332,12 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// DatabasePath is the SQLite file backing task persistence.
-func (c Config) DatabasePath() string {
-	return filepath.Join(c.Storage.DataDir, "video-stream.db")
-}
-
-// VaultPath is where the encrypted credential vault lives. It defaults to a
-// file beside the task database so a user backing up the data directory takes
-// their credentials with them.
+// VaultPath is where the encrypted credential vault lives.
 func (c Config) VaultPath() string {
 	if path := strings.TrimSpace(c.Credentials.VaultPath); path != "" {
 		return path
 	}
-	return filepath.Join(c.Storage.DataDir, "credentials.vault")
+	return filepath.Join(Dir(), "credentials.vault")
 }
 
 func setString(dst *string, key string) {
@@ -394,22 +350,6 @@ func setInt(dst *int, key string) {
 	if v, ok := os.LookupEnv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			*dst = n
-		}
-	}
-}
-
-func setInt64(dst *int64, key string) {
-	if v, ok := os.LookupEnv(key); ok {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			*dst = n
-		}
-	}
-}
-
-func setFloat(dst *float64, key string) {
-	if v, ok := os.LookupEnv(key); ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			*dst = f
 		}
 	}
 }
