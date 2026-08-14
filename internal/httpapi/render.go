@@ -20,6 +20,7 @@ type renderRunRequest struct {
 	RunID        string             `json:"run_id,omitempty"`
 	Platform     string             `json:"platform,omitempty"`
 	SubtitleMode audio.SubtitleMode `json:"subtitle_mode,omitempty"`
+	StillImages  bool               `json:"still_images,omitempty"`
 }
 
 func (s *Server) handleRenderRun(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +46,7 @@ func (s *Server) handleRenderRun(w http.ResponseWriter, r *http.Request) {
 	result, err := s.deps.Render.Run(r.Context(), render.RunRequest{
 		RunID: req.RunID, Project: req.Project, Resolution: res,
 		Finalized: req.Finalized, IncludeBGM: req.IncludeBGM || req.BGM.URI != "", BGM: req.BGM, ResumeFrom: req.ResumeFrom,
-		Platform: req.Platform, SubtitleMode: req.SubtitleMode,
+		Platform: req.Platform, SubtitleMode: req.SubtitleMode, StillImages: req.StillImages,
 	})
 	if errors.Is(err, render.ErrNotFinalized) || errors.Is(err, render.ErrPreviewRequired) {
 		writeError(w, r, http.StatusUnprocessableEntity, "render_rejected", err.Error())

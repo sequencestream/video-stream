@@ -21,10 +21,10 @@ POST /v1/wizard/sessions/{id}/advance
 所有写请求携带 UUID `operation_id`。`advance` 还须携带 GET/上次响应中的
 `expected_version`；重复 operation 返回首次结果，过期版本返回最新会话，避免重试串步。
 
-## WebUI
+## 调用方
 
-`/wizard/1` … `/wizard/7` 调用上述 API。会话 ID 写入 `?session=` 并在本地存储保留最近值；
-刷新、步骤跳转或服务重启后通过 GET 恢复，以服务端 `current_step` 为准。
+编排没有界面。会话 ID 由调用方自己保存，服务重启后通过 GET 恢复，一律以服务端
+`current_step` 为准——步骤进度是服务端状态，不是客户端记账。
 
 ## 成本
 

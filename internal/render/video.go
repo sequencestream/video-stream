@@ -29,6 +29,11 @@ type VideoGenInput struct {
 	Prompt         string
 	Seed           string
 	RefURI         string
+	// StillImage holds a local image steady instead of applying Ken Burns. The
+	// flag only reaches the image branch; video and motion-graphics sources are
+	// unaffected. It stays out of every derived hash because it changes how a
+	// frame is presented, not what the seg says.
+	StillImage bool
 }
 
 // FFmpegVideoGenerator turns local media into normalized, independently
@@ -211,6 +216,11 @@ func (g FFmpegVideoGenerator) arguments(in VideoGenInput, source string, kind lo
 		filter := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,fps=%d,setsar=1", width, height, width, height, fps)
 		args = append(common, "-stream_loop", "-1", "-i", source, "-t", seconds, "-vf", filter)
 	case mediaImage:
+		if in.StillImage {
+			filter := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,fps=%d,setsar=1", width, height, width, height, fps)
+			args = append(common, "-loop", "1", "-i", source, "-t", seconds, "-vf", filter)
+			break
+		}
 		kb := hybrid.ComputeKenBurns(hybrid.KenBurnsSeed(in.SegID, in.Text), width, height)
 		step := (kb.EndScale - kb.StartScale) / float64(frames)
 		x := fmt.Sprintf("(iw-iw/zoom)*(%0.6f+(%0.6f-%0.6f)*on/%d)", kb.StartX, kb.EndX, kb.StartX, frames)

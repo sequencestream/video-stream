@@ -2,7 +2,7 @@ SHELL := /bin/bash
 VERSION ?= 0.1.0-dev
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help build test vet fmt check secrets run sidecar webui webui-build up down logs clean
+.PHONY: help build test vet fmt check secrets run sidecar up down logs clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -33,17 +33,6 @@ sidecar: ## Run the Python sidecar in the foreground
 	cd sidecar && python3 -m venv .venv \
 	  && .venv/bin/pip install -q -r requirements.txt \
 	  && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090
-
-webui: ## Run the WebUI dev server
-	cd webui && npm install && npm run dev
-
-webui-build: ## Build the WebUI static export into internal/webui/dist
-	cd webui && npm ci && npm run build
-	rm -rf internal/webui/dist
-	mkdir -p internal/webui/dist
-	cp -R webui/out/. internal/webui/dist/
-	touch internal/webui/dist/.gitkeep
-	@echo "embedded WebUI refreshed; run 'make build' to bake it into the binary"
 
 up: ## Start the full stack with Docker Compose
 	docker compose up --build -d

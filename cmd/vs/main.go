@@ -1,6 +1,9 @@
-// Command vs is the video-stream CLI. It is a thin HTTP client for the main
-// service rather than a second database client, so the CLI and the WebUI always
-// observe the same task semantics.
+// Command vs is the video-stream CLI, and the product's only interface.
+//
+// It is a thin HTTP client for the main service rather than a second database
+// client, so a command and the service can never disagree about what a task or
+// a project is. Every command takes -json, because the caller this is built for
+// is an agent that parses what it gets back rather than reads it.
 package main
 
 import (
@@ -9,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -35,6 +39,10 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	switch args[0] {
+	case "video":
+		return cmdVideo(ctx, args[1:])
+	case "project", "proj":
+		return cmdProject(ctx, args[1:])
 	case "create":
 		return cmdCreate(ctx, args[1:])
 	case "render":
@@ -59,8 +67,10 @@ func usage() {
 	fmt.Fprint(os.Stderr, `vs - video-stream CLI
 
 Usage:
+  vs video -title T -script FILE [-image IMG]   script to finished MP4 in one call
+  vs project <cmd>         import and inspect projects (see vs project help)
+  vs render <project>      render a stored project
   vs create [flags]        submit a task (defaults to the echo fake task)
-  vs render <project> ...  submit a render task
   vs status <task-id>      show a task
   vs credential <cmd>      manage provider API keys (see vs credential help)
   vs version               print the CLI version
@@ -105,7 +115,13 @@ func cmdCreate(ctx context.Context, args []string) error {
 func cmdRender(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("render", flag.ContinueOnError)
 	server := fs.String("server", defaultServer(), "main service base URL")
-	resolution := fs.String("resolution", "1080p", "target resolution")
+	resolution := fs.String("resolution", "1080p", "target resolution: 720p or 1080p")
+	platform := fs.String("platform", "", "target platform; selects subtitle mode and loudness")
+	subtitleMode := fs.String("subtitle-mode", "", "burn_in or soft; defaults to the platform preference")
+	stillImages := fs.Bool("still-images", false, "hold background images steady instead of applying Ken Burns")
+	finalized := fs.Bool("finalized", false, "allow finalized-only stages such as BGM beat matching")
+	wait := fs.Bool("wait", false, "poll until the render settles")
+	timeout := fs.Duration("timeout", renderTimeout, "how long to wait when -wait is set")
 	asJSON := fs.Bool("json", false, "print the raw JSON response")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -116,10 +132,10 @@ func cmdRender(ctx context.Context, args []string) error {
 		return errors.New("usage: vs render <project>")
 	}
 
-	task, err := newClient(*server).CreateTask(ctx, createTaskRequest{
-		Type:    "render",
-		Title:   project,
-		Payload: map[string]any{"project": project, "resolution": *resolution},
+	task, err := runRenderTask(ctx, newClient(*server), renderOptions{
+		ProjectID: project, Resolution: *resolution, Platform: *platform,
+		SubtitleMode: *subtitleMode, StillImages: *stillImages, Finalized: *finalized,
+		Wait: *wait, Timeout: *timeout,
 	})
 	if err != nil {
 		return err
@@ -147,6 +163,14 @@ func cmdStatus(ctx context.Context, args []string) error {
 	return printTask(task, *asJSON)
 }
 
+// writeJSON is the single JSON writer so every command emits the same shape:
+// indented, newline-terminated, parseable by whatever called it.
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
 func defaultServer() string {
 	if v := os.Getenv("VS_SERVER"); v != "" {
 		return v
@@ -158,9 +182,7 @@ func defaultServer() string {
 // key/value block: it is what the acceptance check reads.
 func printTask(t task, asJSON bool) error {
 	if asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(t)
+		return writeJSON(os.Stdout, t)
 	}
 
 	var b strings.Builder

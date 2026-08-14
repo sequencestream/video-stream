@@ -1,6 +1,10 @@
 // Package httpapi exposes the main service's HTTP surface: health probes, the
-// task API used by both the CLI and the WebUI, and a redacted metadata view of
-// the loaded configuration.
+// task API the CLI drives, project intake, and a redacted metadata view of the
+// loaded configuration.
+//
+// There is no UI route. The product surface is the CLI, and agents drive that
+// CLI; an HTTP endpoint that serves HTML would be a second, divergent surface
+// with no consumer.
 package httpapi
 
 import (
@@ -18,6 +22,8 @@ import (
 	"github.com/sequencestream/video-stream/internal/credential"
 	"github.com/sequencestream/video-stream/internal/hybrid"
 	"github.com/sequencestream/video-stream/internal/ideation"
+	"github.com/sequencestream/video-stream/internal/intake"
+	"github.com/sequencestream/video-stream/internal/media"
 	"github.com/sequencestream/video-stream/internal/queue"
 	"github.com/sequencestream/video-stream/internal/radar"
 	"github.com/sequencestream/video-stream/internal/recompile"
@@ -67,9 +73,15 @@ type Deps struct {
 	YouTube *youtube.Engine
 	// Wizard backs the end-to-end seven-step product flow.
 	Wizard *wizard.Engine
-	// WebUI serves the embedded interface at "/". Nil leaves the root
-	// unrouted, which is what the API tests want.
-	WebUI   http.Handler
+	// Intake turns a title and narration prose into a sealed project. It is the
+	// entry point of the CLI flow: everything downstream needs a seg graph, and
+	// this is what builds one from what an author actually writes.
+	Intake *intake.Engine
+	// Projects backs project read/write over HTTP. The CLI is a pure API
+	// client, so without this there is no way to reach a stored project.
+	Projects store.ProjectStore
+	// Media fits background images to the render frame under MediaDir.
+	Media   *media.Preparer
 	Logger  *slog.Logger
 	Version string
 }
@@ -132,13 +144,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/wizard/sessions", s.handleWizardCreate)
 	mux.HandleFunc("GET /v1/wizard/sessions/{id}", s.handleWizardGet)
 	mux.HandleFunc("POST /v1/wizard/sessions/{id}/advance", s.handleWizardAdvance)
-
-	// The embedded UI takes the bare "/" pattern, which in net/http is the
-	// catch-all. It is registered last so every API route above wins, and the
-	// UI only sees what is left over.
-	if s.deps.WebUI != nil {
-		mux.Handle("/", s.deps.WebUI)
-	}
+	mux.HandleFunc("POST /v1/projects", s.handleCreateProject)
+	mux.HandleFunc("GET /v1/projects", s.handleListProjects)
+	mux.HandleFunc("GET /v1/projects/{id}", s.handleGetProject)
+	mux.HandleFunc("DELETE /v1/projects/{id}", s.handleDeleteProject)
+	mux.HandleFunc("POST /v1/projects/{id}/background", s.handleProjectBackground)
 
 	return s.withLogging(mux)
 }

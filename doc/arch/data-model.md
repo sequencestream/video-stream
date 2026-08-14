@@ -216,10 +216,11 @@ recompile_runs(id, project_id, planned_at, total_segs, invalidated_segs,
 ## 明确不做
 
 - **编辑标签求值**（`filler` / `silence` / `repeat`）。纯 TTS 通路下没有输入可处理。
-- **可视化时间轴编辑器**，以及任何 UI。
-- **HTTP / CLI 入口**。`/v1/projects` 的形状应该由第一个真正使用它的意图来定；
-  现在定就是替未来的人做决定。`ProjectStore` 的往返序列化已经足以证明模型、校验、
-  迁移三条链路成立。
+- **可视化时间轴编辑器**，以及任何 UI。产品表面只有 CLI。
+- ~~**HTTP / CLI 入口**~~。已交付。当初的判断是「形状应该由第一个真正使用它的意图来定」，
+  那个意图后来出现了：agent 通过 CLI 驱动出片，必须能创建和读取工程。所以入口不是按
+  想象中的 CRUD 建的——`POST /v1/projects` 收的是标题加口播稿而不是 seg 数组，因为手写
+  seg 数组正是这条路径要消灭的东西。见 [`intake.md`](intake.md)。
 - **数据库 DDL 迁移框架**。本次只有 `CREATE TABLE IF NOT EXISTS`，没有破坏性 DDL。
   一个零条记录的迁移框架是没被执行过的代码；等第一次真要改列时再写，那时才知道它该长什么样。
   文档级迁移（`model.Migrator`）是另一回事，已经交付。
