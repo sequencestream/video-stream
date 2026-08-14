@@ -18,7 +18,7 @@ func TestCredentialSetThenStatusThenRemove(t *testing.T) {
 	dir, configPath := newCLIWorkspace(t)
 	vaultPath := filepath.Join(dir, "credentials.vault")
 
-	stdout, _, err := runCredential(t, theSecret, "set", "-config", configPath, "openai")
+	stdout, _, err := runCredentialCLI(t, theSecret, "set", "-config", configPath, "openai")
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestCredentialSetThenStatusThenRemove(t *testing.T) {
 		t.Fatalf("set should report the key and the backend, got %q", stdout)
 	}
 
-	stdout, _, err = runCredential(t, "", "status", "-config", configPath)
+	stdout, _, err = runCredentialCLI(t, "", "status", "-config", configPath)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestCredentialSetThenStatusThenRemove(t *testing.T) {
 		t.Fatalf("status should show openai backed by the vault, got %q", stdout)
 	}
 
-	stdout, _, err = runCredential(t, "", "rm", "-config", configPath, "openai")
+	stdout, _, err = runCredentialCLI(t, "", "rm", "-config", configPath, "openai")
 	if err != nil {
 		t.Fatalf("rm: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestCredentialSetThenStatusThenRemove(t *testing.T) {
 		t.Fatalf("rm should confirm the removal, got %q", stdout)
 	}
 
-	stdout, _, err = runCredential(t, "", "status", "-config", configPath)
+	stdout, _, err = runCredentialCLI(t, "", "status", "-config", configPath)
 	if err != nil {
 		t.Fatalf("status after rm: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestCredentialOutputNeverContainsTheSecret(t *testing.T) {
 	}
 
 	for _, run := range runs {
-		stdout, stderr, err := runCredential(t, run.stdin, run.args...)
+		stdout, stderr, err := runCredentialCLI(t, run.stdin, run.args...)
 		if err != nil {
 			t.Fatalf("%s: %v", run.name, err)
 		}
@@ -90,7 +90,7 @@ func TestCredentialOutputNeverContainsTheSecret(t *testing.T) {
 func TestCredentialSetLeavesNoPlaintextOnDisk(t *testing.T) {
 	dir, configPath := newCLIWorkspace(t)
 
-	if _, _, err := runCredential(t, theSecret, "set", "-config", configPath, "openai"); err != nil {
+	if _, _, err := runCredentialCLI(t, theSecret, "set", "-config", configPath, "openai"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestCredentialSetLeavesNoPlaintextOnDisk(t *testing.T) {
 func TestCredentialSetRejectsAnEmptyKey(t *testing.T) {
 	_, configPath := newCLIWorkspace(t)
 
-	_, _, err := runCredential(t, "\n", "set", "-config", configPath, "openai")
+	_, _, err := runCredentialCLI(t, "\n", "set", "-config", configPath, "openai")
 	if err == nil {
 		t.Fatal("expected an error for an empty key")
 	}
@@ -122,7 +122,7 @@ func TestCredentialSetRejectsAnEmptyKey(t *testing.T) {
 func TestCredentialSetWarnsOnAnUnknownProvider(t *testing.T) {
 	_, configPath := newCLIWorkspace(t)
 
-	_, stderr, err := runCredential(t, theSecret, "set", "-config", configPath, "opeanai")
+	_, stderr, err := runCredentialCLI(t, theSecret, "set", "-config", configPath, "opeanai")
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestCredentialRemoveExplainsEnvironmentBackedKeys(t *testing.T) {
 	_, configPath := newCLIWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", theSecret)
 
-	_, _, err := runCredential(t, "", "rm", "-config", configPath, "openai")
+	_, _, err := runCredentialCLI(t, "", "rm", "-config", configPath, "openai")
 	if err == nil {
 		t.Fatal("expected an error: vs cannot unset a variable in the user's shell")
 	}
@@ -156,7 +156,7 @@ func TestCredentialSetWarnsWhenTheEnvironmentShadowsTheNewKey(t *testing.T) {
 	_, configPath := newCLIWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", "sk-an-older-key-still-exported")
 
-	_, stderr, err := runCredential(t, theSecret, "set", "-config", configPath, "openai")
+	_, stderr, err := runCredentialCLI(t, theSecret, "set", "-config", configPath, "openai")
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestCredentialStatusReportsALockedVault(t *testing.T) {
 	_, configPath := newCLIWorkspace(t)
 	t.Setenv(vaultPassphraseEnv, "")
 
-	_, stderr, err := runCredential(t, "", "status", "-config", configPath)
+	_, stderr, err := runCredentialCLI(t, "", "status", "-config", configPath)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestCredentialStatusReportsALockedVault(t *testing.T) {
 }
 
 func TestCredentialRejectsUnknownSubcommands(t *testing.T) {
-	if _, _, err := runCredential(t, "", "rotate"); err == nil {
+	if _, _, err := runCredentialCLI(t, "", "rotate"); err == nil {
 		t.Fatal("expected an error for an unknown subcommand")
 	}
 }
@@ -213,10 +213,10 @@ func newCLIWorkspace(t *testing.T) (dir, configPath string) {
 	return dir, configPath
 }
 
-// runCredential invokes the subcommand with stdin, stdout and stderr backed by
+// runCredentialCLI invokes the subcommand with stdin, stdout and stderr backed by
 // files, which keeps the code under test unaware that it is being tested and
 // makes IsTerminal report false, exercising the piped path.
-func runCredential(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
+func runCredentialCLI(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -226,7 +226,7 @@ func runCredential(t *testing.T, stdin string, args ...string) (stdout, stderr s
 
 	originalIn, originalOut, originalErr := os.Stdin, os.Stdout, os.Stderr
 	os.Stdin, os.Stdout, os.Stderr = in, out, errStream
-	err = cmdCredential(context.Background(), args)
+	err = allCommands().run(context.Background(), "credential", args)
 	os.Stdin, os.Stdout, os.Stderr = originalIn, originalOut, originalErr
 
 	in.Close()

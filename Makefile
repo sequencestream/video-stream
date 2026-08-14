@@ -1,16 +1,24 @@
 SHELL := /bin/bash
 VERSION ?= 0.1.0-dev
 LDFLAGS := -X main.version=$(VERSION)
+PREFIX ?= /usr/local
 
-.PHONY: help build test vet fmt check secrets run sidecar up down logs clean
+.PHONY: help build install uninstall test vet fmt secrets check whisper docker clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-10s %s\n", $$1, $$2}'
 
-build: ## Build vsd and vs into ./bin
+build: ## Build vs into ./bin
 	@mkdir -p bin
-	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vsd ./cmd/vsd
-	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vs  ./cmd/vs
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vs ./cmd/vs
+
+install: build ## Install vs into $(PREFIX)/bin
+	install -m 0755 bin/vs $(PREFIX)/bin/vs
+	@echo "installed $(PREFIX)/bin/vs"
+	@$(PREFIX)/bin/vs doctor || true
+
+uninstall: ## Remove the installed binary
+	rm -f $(PREFIX)/bin/vs
 
 test: ## Run the Go test suite
 	go test ./...
@@ -26,22 +34,11 @@ secrets: ## Fail if a plaintext credential was committed
 
 check: vet test secrets ## Vet, test and scan for committed credentials
 
-run: build ## Run the main service in the foreground
-	./bin/vsd
+whisper: ## Install the speech recognition backend for the current interpreter
+	python3 -m pip install --upgrade faster-whisper
 
-sidecar: ## Run the Python sidecar in the foreground
-	cd sidecar && python3 -m venv .venv \
-	  && .venv/bin/pip install -q -r requirements.txt \
-	  && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090
+docker: ## Build a container with vs, ffmpeg and faster-whisper
+	docker build -t video-stream/vs:$(VERSION) .
 
-up: ## Start the full stack with Docker Compose
-	docker compose up --build -d
-
-down: ## Stop the stack
-	docker compose down
-
-logs: ## Follow the stack logs
-	docker compose logs -f
-
-clean: ## Remove build output and local runtime data
-	rm -rf bin data output
+clean: ## Remove build output
+	rm -rf bin dist

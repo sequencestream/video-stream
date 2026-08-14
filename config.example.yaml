@@ -1,83 +1,89 @@
-# video-stream configuration.
+# vs configuration — every field is optional.
 #
-# Copy to config.yaml and adjust. Every field can also be set through a VS_-
-# prefixed environment variable, which takes precedence over this file.
+# Copy this to the path `vs doctor` reports (usually ~/.config/vs/config.yaml on
+# Linux, ~/Library/Application Support/vs/config.yaml on macOS) and delete
+# everything you do not want to change. The built-in defaults shown here are
+# what runs when there is no file at all.
 #
-# There is no field anywhere in this file for an API key, and that is not an
-# omission. Keys live in your OS keychain or an encrypted vault on your own
-# machine; store one with `vs credential set <provider>`. See
-# doc/arch/credentials.md.
+# Precedence: defaults < this file < VS_ environment variables < command flags.
+# No secret belongs in here; use `vs credential set` instead.
 
-server:
-  addr: ":8080" # VS_SERVER_ADDR
+# External binaries. Bare names are looked up on PATH.
+tools:
+  ffmpeg: ffmpeg
+  ffprobe: ffprobe
+  python: python3
 
-sidecar:
-  base_url: "http://127.0.0.1:8090" # VS_SIDECAR_BASE_URL
-  timeout: 5s # VS_SIDECAR_TIMEOUT
+# Speech recognition, used by transcribe, subtitle and filler.
+asr:
+  backend: faster-whisper
+  # tiny / base / small / medium / large-v3, or a converted model directory.
+  # Bigger is slower and more accurate; small is a reasonable default for
+  # Chinese, large-v3 is noticeably better on names and technical terms.
+  model: small
+  # Two-letter code. Empty autodetects, which costs an extra pass and
+  # occasionally guesses wrong on a video that opens with music.
+  language: ""
+  device: auto          # auto | cpu | cuda
+  compute_type: auto    # auto | int8 | int8_float16 | float16 | float32
+  model_dir: ""         # where downloaded models are cached
+  threads: 0            # 0 lets the backend decide
+  # Leave this on. Whisper invents fluent sentences to fill long silences.
+  vad: true
 
-storage:
-  data_dir: "./data" # VS_DATA_DIR — holds video-stream.db
-  output_dir: "./output" # VS_OUTPUT_DIR — holds rendered artifacts
-  media_dir: "./media" # VS_MEDIA_DIR — optional <project>/<seg>.jpg|png|mp4|mov sources
+# Default caption geometry and look. Colors are ASS &HBBGGRR — blue, green,
+# red — which is the order libass reads, not RGB.
+subtitle:
+  font: ""              # e.g. "PingFang SC", "Source Han Sans"
+  font_size: 42
+  primary_color: "&H00FFFFFF"
+  outline_color: "&H00000000"
+  outline: 2
+  shadow: 0
+  margin_v: 60
+  position: bottom      # bottom | center | top
+  max_chars: 20         # per line; 20 suits Chinese, 42 suits English
+  max_lines: 2
 
-audio:
-  # edge is the production default; stub is only for offline development/tests.
-  provider: "edge" # VS_TTS_PROVIDER — edge | stub
-  default_voice: "zh-CN-XiaoxiaoNeural" # VS_TTS_VOICE
-  python_binary: "python3" # VS_TTS_PYTHON_BINARY; must have the edge-tts package
-  ffmpeg_binary: "ffmpeg" # VS_TTS_FFMPEG_BINARY
+# What `vs filler` considers worth cutting.
+filler:
+  # Added to the built-in hesitation list.
+  extra_words: []
+  # Removed from it, for a speaker whose "嗯" carries meaning.
+  keep_words: []
+  # Silence longer than this is shortened to it, not closed: speech spliced to
+  # a zero gap sounds like a machine did it.
+  max_pause: 700ms
+  # Every cut is pulled back from its neighbours by this much, because word
+  # boundaries from a recognizer are approximate.
+  pad_head: 60ms
+  pad_tail: 80ms
+  # Surviving fragments shorter than this are dropped; a 40ms island of speech
+  # reads as a glitch rather than as a word.
+  min_keep: 200ms
 
-budget:
-  max_cost_per_video_usd: 2.0 # VS_MAX_COST_PER_VIDEO_USD
-  daily_cap_usd: 20.0 # VS_DAILY_CAP_USD
+# Output encoding, applied whenever a command has to re-encode.
+encode:
+  video_codec: libx264
+  audio_codec: aac
+  crf: 20               # lower is better; 18 is visually lossless
+  preset: medium        # ultrafast .. veryslow
+  audio_bitrate: 192k
 
+# Diagnostics. Normal command output does not go through the logger.
 logging:
-  level: "info" # VS_LOG_LEVEL — debug | info | warn | error
-  format: "json" # VS_LOG_FORMAT — json | text
+  level: warn           # debug | info | warn | error
+  format: text          # text | json
 
-telemetry:
-  enabled: false # VS_TELEMETRY_ENABLED
-  endpoint: "" # VS_TELEMETRY_ENDPOINT — reserved for a remote sink
-
-queue:
-  workers: 2 # VS_QUEUE_WORKERS
-  buffer: 64 # VS_QUEUE_BUFFER
-
-radar:
-  interval: 6h # VS_RADAR_INTERVAL — zero disables background polling
-  per_minute: 6 # VS_RADAR_PER_MINUTE — requests per platform per minute; zero means unlimited
-  burst: 1 # VS_RADAR_BURST — back-to-back grants after idle
-
+# Where API keys are stored. The keys themselves never appear in this file.
 credentials:
-  # VS_CREDENTIALS_BACKEND — where secrets are read from and written to:
-  #   auto     environment, then OS keychain, then encrypted vault (default)
-  #   keychain environment, then OS keychain; fails at startup without one
-  #   vault    environment, then the encrypted vault file
-  #   env      environment variables only
-  backend: "auto"
-  # VS_CREDENTIALS_VAULT_PATH — defaults to <data_dir>/credentials.vault.
-  # Unlock it with VS_VAULT_PASSPHRASE, or let `vs` prompt on a terminal.
-  vault_path: ""
+  backend: auto         # auto | keychain | vault | env
+  vault_path: ""        # defaults to credentials.vault beside this file
 
-  vault_path: ""
-
-notifications:
-  webhook_url: "" # VS_NOTIFY_WEBHOOK_URL
-  email_to: "" # VS_NOTIFY_EMAIL_TO
-  smtp_host: ""
-  smtp_port: 587
-  smtp_from: "video-stream@localhost"
-  smtp_user: ""
-
-# Providers carry metadata only. Each one's key is looked up under
-# "provider/<name>" in the credential store.
-providers:
-  - name: "openai"
-    base_url: "https://api.openai.com/v1"
-    model: "gpt-4o-mini"
-    protocol: "openai"
-  # Any OpenAI-compatible endpoint works by pointing base_url at it.
-  - name: "dashscope"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    model: "qwen-plus"
-    protocol: "openai"
+# Hosted model providers, for commands that call one. Nothing in the editing
+# commands needs this: recognition and every ffmpeg operation run locally.
+providers: []
+#  - name: openai
+#    base_url: https://api.openai.com/v1
+#    model: gpt-4o-mini
+#    protocol: openai

@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/sequencestream/video-stream/internal/logging"
 	"github.com/sequencestream/video-stream/internal/redact"
 )
 
@@ -162,7 +163,7 @@ func TestLoggerRedactsBothLayers(t *testing.T) {
 	for _, format := range []string{"json", "text"} {
 		t.Run(format, func(t *testing.T) {
 			var buf bytes.Buffer
-			logger := logging.New(&buf, logging.Options{Level: "debug", Format: format})
+			logger := newLogger(&buf, format)
 
 			logger.Info("provider call",
 				"api_key", "value-that-was-never-registered",
@@ -188,10 +189,21 @@ func TestLoggerRedactsInsideGroups(t *testing.T) {
 	redact.Register(testSecret)
 
 	var buf bytes.Buffer
-	logger := logging.New(&buf, logging.Options{Level: "debug", Format: "json"})
+	logger := newLogger(&buf, "json")
 	logger.WithGroup("upstream").Info("call", "token", testSecret, "host", "api.example.com")
 
 	if out := buf.String(); strings.Contains(out, testSecret) {
 		t.Errorf("secret leaked from inside a group: %s", out)
 	}
+}
+
+// newLogger builds a logger with redaction installed the way a caller is
+// expected to: through ReplaceAttr, which is the only hook that covers every
+// attribute without each call site remembering to sanitise its own.
+func newLogger(w io.Writer, format string) *slog.Logger {
+	opts := &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: redact.Attr}
+	if format == "text" {
+		return slog.New(slog.NewTextHandler(w, opts))
+	}
+	return slog.New(slog.NewJSONHandler(w, opts))
 }
