@@ -63,13 +63,13 @@ key 相同**且**产物实际时长落在本次预算区间内。查不到产物
 
 ## 交给渲染执行器
 
-向导在预览编辑时生成的 `recompile.Plan` 作为 `render.RunRequest.RecompilePlan` 原样传入
+编辑预览时生成的 `recompile.Plan` 作为 `render.RunRequest.RecompilePlan` 原样传入
 渲染执行器。执行器在启动任何 stage 前验证计划与当前工程匹配：project id 必须一致，
 `invalidated` 与 `reused` 必须无重复地完整覆盖所有 seg；全量重跑还必须点名边界、失效全部
 seg 且不能声明复用。缺失、未知或重复 seg 的计划会被拒绝，不能静默少渲染。
 
-执行结果回传已接收的计划，向导据此发布失效数和总 seg 数。这让集成测试覆盖的是
-“规划器 → 执行器 → 向导状态”的真实交接，而不是只验证规划器在旁路算出了一个数字。
+执行结果回传已接收的计划，调用方据此读出失效数和总 seg 数。这让集成测试覆盖的是
+“规划器 → 执行器 → 回传结果”的真实交接，而不是只验证规划器在旁路算出了一个数字。
 
 `visuals` stage 严格执行这份分区：`reused` seg 直接从 `artifacts` 读取 URI，并把同一 URI
 写入本次 run 的 `render_seg_artifacts` 追溯记录；只有 `invalidated` seg 会调用视频生成器，
@@ -167,6 +167,12 @@ GET /v1/recompile/report[?project=<id>]
 
 引擎没接上时（`Deps.Recompile == nil`）路由仍然应答，返回空计数 + `insufficient_data`。
 计数归零而判定默认成 `viable` 会说「赌注正在兑现」，而实际上什么都没测过。
+
+**目前 `Plan` 没有生产者。** 唯一调用它的是已删除的 7 步向导——预览步里改一句话会触发一次
+规划。渲染执行器仍然接受并严格校验 `RecompilePlan`，规划器与六条边界也仍然有测试覆盖，但
+在补上一个「改某个 seg 然后重渲染」的入口之前，`/v1/recompile/report` 只会一直报
+`insufficient_data`。这是本项目最大技术赌注的度量入口断了，记在
+[`doc/todo.md`](../todo.md) 的 `vs seg edit`，不是一个可以忘掉的细节。
 
 ## schema v2
 

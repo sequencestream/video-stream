@@ -260,42 +260,6 @@ CREATE TABLE IF NOT EXISTS render_seg_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_render_seg_project ON render_seg_artifacts(project_id, seg_id);
 
-CREATE TABLE IF NOT EXISTS wizard_sessions (
-	id              TEXT PRIMARY KEY,
-	current_step    INTEGER NOT NULL,
-	status          TEXT NOT NULL,
-	topic           TEXT NOT NULL DEFAULT '',
-	category        TEXT NOT NULL DEFAULT '',
-	project_id      TEXT NOT NULL DEFAULT '',
-	state_json      TEXT NOT NULL DEFAULT '{}',
-	cost_micros     INTEGER NOT NULL DEFAULT 0,
-	failed_step     INTEGER NOT NULL DEFAULT 0,
-	error           TEXT NOT NULL DEFAULT '',
-	hook_confirm_ms INTEGER NOT NULL DEFAULT 0,
-	version         INTEGER NOT NULL DEFAULT 1,
-	active_operation_id TEXT NOT NULL DEFAULT '',
-	failed_operation_id TEXT NOT NULL DEFAULT '',
-	created_at      INTEGER NOT NULL,
-	updated_at      INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS wizard_operations (
-	operation_id     TEXT PRIMARY KEY,
-	session_id       TEXT NOT NULL DEFAULT '',
-	kind             TEXT NOT NULL,
-	step             INTEGER NOT NULL DEFAULT 0,
-	expected_version INTEGER NOT NULL DEFAULT 0,
-	request_json     TEXT NOT NULL DEFAULT '{}',
-	request_hash     TEXT NOT NULL,
-	status           TEXT NOT NULL,
-	result_json      TEXT NOT NULL DEFAULT '',
-	error_code       TEXT NOT NULL DEFAULT '',
-	error            TEXT NOT NULL DEFAULT '',
-	created_at       INTEGER NOT NULL,
-	updated_at       INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_wizard_operations_session ON wizard_operations(session_id, created_at);
-
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	name       TEXT PRIMARY KEY,
 	applied_at INTEGER NOT NULL
@@ -353,13 +317,9 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 }
 
 func applySQLiteMigrations(db *sql.DB) error {
-	if err := applyColumnMigration(db, "001_wizard_operation_journal", "wizard_sessions", []struct{ name, ddl string }{
-		{"version", `ALTER TABLE wizard_sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 1`},
-		{"active_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN active_operation_id TEXT NOT NULL DEFAULT ''`},
-		{"failed_operation_id", `ALTER TABLE wizard_sessions ADD COLUMN failed_operation_id TEXT NOT NULL DEFAULT ''`},
-	}); err != nil {
-		return err
-	}
+	// 001_wizard_operation_journal is retired: the wizard it migrated is gone.
+	// The name stays claimed in schema_migrations on existing databases, and
+	// the columns stay on their table — this store does no destructive DDL.
 	if err := applyColumnMigration(db, "002_render_subtitle_delivery", "render_runs", []struct{ name, ddl string }{
 		{"platform", `ALTER TABLE render_runs ADD COLUMN platform TEXT NOT NULL DEFAULT 'youtube'`},
 		{"subtitle_mode", `ALTER TABLE render_runs ADD COLUMN subtitle_mode TEXT NOT NULL DEFAULT 'soft'`},

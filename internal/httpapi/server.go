@@ -32,7 +32,6 @@ import (
 	"github.com/sequencestream/video-stream/internal/sidecar"
 	"github.com/sequencestream/video-stream/internal/store"
 	"github.com/sequencestream/video-stream/internal/visual"
-	"github.com/sequencestream/video-stream/internal/wizard"
 	"github.com/sequencestream/video-stream/internal/youtube"
 )
 
@@ -71,8 +70,6 @@ type Deps struct {
 	CostWarden *costwarden.Engine
 	// YouTube backs publish and delivery download.
 	YouTube *youtube.Engine
-	// Wizard backs the end-to-end seven-step product flow.
-	Wizard *wizard.Engine
 	// Intake turns a title and narration prose into a sealed project. It is the
 	// entry point of the CLI flow: everything downstream needs a seg graph, and
 	// this is what builds one from what an author actually writes.
@@ -141,9 +138,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/youtube/publish", s.handleYouTubePublish)
 	mux.HandleFunc("GET /v1/youtube/uploads/{id}", s.handleYouTubeUploadByID)
 	mux.HandleFunc("GET /v1/delivery/download", s.handleDeliveryDownload)
-	mux.HandleFunc("POST /v1/wizard/sessions", s.handleWizardCreate)
-	mux.HandleFunc("GET /v1/wizard/sessions/{id}", s.handleWizardGet)
-	mux.HandleFunc("POST /v1/wizard/sessions/{id}/advance", s.handleWizardAdvance)
 	mux.HandleFunc("POST /v1/projects", s.handleCreateProject)
 	mux.HandleFunc("GET /v1/projects", s.handleListProjects)
 	mux.HandleFunc("GET /v1/projects/{id}", s.handleGetProject)

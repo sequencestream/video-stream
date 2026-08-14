@@ -36,7 +36,6 @@ import (
 	"github.com/sequencestream/video-stream/internal/tasks"
 	"github.com/sequencestream/video-stream/internal/telemetry"
 	"github.com/sequencestream/video-stream/internal/visual"
-	"github.com/sequencestream/video-stream/internal/wizard"
 	"github.com/sequencestream/video-stream/internal/youtube"
 	"github.com/sequencestream/video-stream/internal/youtube/notify"
 )
@@ -204,18 +203,6 @@ func run() error {
 
 	visualEngine := visual.New(visual.Options{Store: taskStore, Reporter: reporter, Logger: logger})
 	hybridEngine := hybrid.New(hybrid.Options{Store: taskStore, Reporter: reporter, Logger: logger})
-	wizardEngine := wizard.New(wizard.Options{
-		Store: taskStore, Projects: taskStore,
-		Radar: radarEngine, Ideation: ideationEngine, Script: scriptEngine,
-		Hybrid: hybridEngine, Compliance: complianceEngine, Render: renderEngine,
-		Recompile: recompiler, CostWarden: costEngine, YouTube: youtubeEngine, Reporter: reporter,
-	})
-	if recovered, err := wizardEngine.RecoverInterrupted(context.Background()); err != nil {
-		return fmt.Errorf("recover interrupted wizard operations: %w", err)
-	} else if recovered > 0 {
-		logger.Warn("recovered interrupted wizard operations", slog.Int("count", recovered))
-	}
-
 	q := queue.NewInProcess(queue.Options{
 		Store:    taskStore,
 		Registry: registry,
@@ -253,7 +240,6 @@ func run() error {
 		Audio:        audioEngine,
 		CostWarden:   costEngine,
 		YouTube:      youtubeEngine,
-		Wizard:       wizardEngine,
 		Intake:       intakeEngine,
 		Projects:     taskStore,
 		Media:        &mediaPreparer,
